@@ -33,6 +33,10 @@ import org.apache.spark.TaskState.TaskState
 import org.apache.spark.util.{Clock, SystemClock, Utils}
 
 /**
+  * FIXME 在TaskSchedulerImpl中，对一个单独的TaskSet的任务进行调度。
+  * FIXME 这个类负责追踪每个task，如果task失败，会负责重试，直到超过重试最大次数。
+  * FIXME 并且会通过延迟调度，为这个TaskSet处理本地化调度机制。它的主要接口是resourceOffer，在这个接口中
+  * FIXME TaskSet会希望在一个节点上运行一个任务，并且接受任务的状态改变消息，来知道它负责的task的状态改变了
  * Schedules the tasks within a single TaskSet in the TaskSchedulerImpl. This class keeps track of
  * each task, retries tasks if they fail (up to a limited number of times), and
  * handles locality-aware scheduling for this TaskSet via delay scheduling. The main interfaces
@@ -105,6 +109,7 @@ private[spark] class TaskSetManager(
   // state until all tasks have finished running; we keep TaskSetManagers that are in the zombie
   // state in order to continue to track and account for the running tasks.
   // TODO: We should kill any running task attempts when the task set manager becomes a zombie.
+  // 是否行尸走肉
   var isZombie = false
 
   // Set of pending tasks for each executor. These collections are actually
@@ -114,6 +119,11 @@ private[spark] class TaskSetManager(
   // back at the head of the stack. They are also only cleaned up lazily;
   // when a task is launched, it remains in all the pending lists except
   // the one that it was launched from, but gets removed from them later.
+  /**
+    * 每个执行者的待定任务。这些收藏品实际上被当作堆栈来处理，在这个堆栈中，新的任务被添加到ArrayBuffer的末尾，并从末端移除。
+    * 这使得检测重复失败的任务变得更快，因为每当一个任务失败时，它就会被放回堆栈的头部。
+    * 它们也只是被懒洋洋地清理干净;当一个任务被启动时，它仍然保留在所有待完成的列表中，除了它从一个开始的列表中，但是稍后将被删除。
+    */
   private val pendingTasksForExecutor = new HashMap[String, ArrayBuffer[Int]]
 
   // Set of pending tasks for each host. Similar to pendingTasksForExecutor,
@@ -186,9 +196,15 @@ private[spark] class TaskSetManager(
       }
     }
 
+    // FIXME preferredLocations归根结底是调用locs.toSet.toSeq
+    // FIXME 获取RDD的partitino是否被cache或者checkpoint，获取到对应的host信息，否则返回Nil
+    // FIXME 在DAGScheduler中getPreferredLocs()实现最终获取的是Array[Seq[TaskLocation]]
+
+    // def preferredLocations: Seq[TaskLocation] = Nil
     for (loc <- tasks(index).preferredLocations) {
       loc match {
         case e: ExecutorCacheTaskLocation =>
+          //  private val pendingTasksForExecutor = new HashMap[String, ArrayBuffer[Int]]
           addTo(pendingTasksForExecutor.getOrElseUpdate(e.executorId, new ArrayBuffer))
         case e: HDFSCacheTaskLocation => {
           val exe = sched.getExecutorsAliveOnHost(loc.host)
@@ -410,6 +426,10 @@ private[spark] class TaskSetManager(
   }
 
   /**
+    * FIXME TaskSetManager复杂的算法，大致意思：去判断这个executor在这个本地化级别，之前的等待时间是多少
+    * FIXME 如果本地化级别的等待时间在一定范围内，那么就认为task使用本地化级别可用在executor上启动
+    *
+    * FIXME 通过查找任务来响应调度程序的单个执行者的提议
    * Respond to an offer of a single executor from the scheduler by finding a task
    *
    * NOTE: this function is either called with a maxLocality which
@@ -432,7 +452,9 @@ private[spark] class TaskSetManager(
 
       var allowedLocality = maxLocality
 
+      // fixme  如果资源是有locality特征的
       if (maxLocality != TaskLocality.NO_PREF) {
+        // fixme 获取当前taskSet允许执行的locality。getAllowedLocalityLevel随时间变化而变化
         allowedLocality = getAllowedLocalityLevel(curTime)
         if (allowedLocality > maxLocality) {
           // We're not allowed to search for farther-away tasks
@@ -440,6 +462,10 @@ private[spark] class TaskSetManager(
         }
       }
 
+      /**
+        * 先调用了函数dequeueTask，如果返回不为空，说明为指定的worker分配了task；这之后，
+        * 进行各种信息更新，将taskId加入到runningTask中，并通知DAGScheduler，最后返回taskDescription
+        */
       dequeueTask(execId, host, allowedLocality) match {
         case Some((index, taskLocality, speculative)) => {
           // Found a task; do some bookkeeping and return a task description

@@ -35,6 +35,7 @@ import org.apache.spark.util.CallSite
  */
 private[scheduler] sealed trait DAGSchedulerEvent
 
+// FIXME 模式匹配定义提交jbo
 private[scheduler] case class JobSubmitted(
     jobId: Int,
     finalRDD: RDD[_],

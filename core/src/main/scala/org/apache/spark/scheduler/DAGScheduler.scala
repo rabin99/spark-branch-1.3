@@ -401,7 +401,7 @@ class DAGScheduler(
           // 底层对应了三个RDD： MapPartitionsRDD/ShuffleRDD/MapPartitionsRDD
           for (dep <- rdd.dependencies) {
             dep match {
-              // 如果是宽依赖
+              // FIXME  如果是宽依赖
               case shufDep: ShuffleDependency[_, _, _] =>
                 // 那么使用宽依赖的那个rdd，创建一个Stage，并且将isShuffleMap设置为true
                 // 但是finalStage之前所有的stage，都是shuffleMap stage
@@ -506,6 +506,8 @@ class DAGScheduler(
   }
 
   /**
+    * FIXME 向作业调度器提交作业，并返回一个job侍应对象。JobWaiter对象
+    * FIXME 可以用来阻塞，直到作业完成执行，或者可以用来取消作业。
     * Submit a job to the job scheduler and get a JobWaiter object back. The JobWaiter object
     * can be used to block until the the job finishes executing or can be used to cancel the job.
     */
@@ -533,6 +535,7 @@ class DAGScheduler(
     assert(partitions.size > 0)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
     val waiter = new JobWaiter(this, jobId, partitions.size, resultHandler)
+    //
     eventProcessLoop.post(JobSubmitted(
       jobId, rdd, func2, partitions.toArray, allowLocal, callSite, waiter, properties))
     waiter
@@ -547,6 +550,7 @@ class DAGScheduler(
                               resultHandler: (Int, U) => Unit,
                               properties: Properties): Unit = {
     val start = System.nanoTime
+    // FIXME 提交JOB任务
     val waiter = submitJob(rdd, func, partitions, callSite, allowLocal, resultHandler, properties)
     waiter.awaitResult() match {
       case JobSucceeded => {
@@ -838,13 +842,17 @@ class DAGScheduler(
         // FIXME 划分stage算法的关键：调用getMissingParentStages()方法，获取当前这个stage的父stage，并且根据stageid进行升序排序
         val missing = getMissingParentStages(stage).sortBy(_.id)
         logDebug("missing: " + missing)
-        // 这里其实会反复递归调用
-        // 直到最初的stage，它没有父stage了，那么就会去提交这个第一个stage，stage0
-        // 其余的stage，此时全部都在waitingStages里面
-        // missing = Nil，没有父stage了，则提交
+
         if (missing == Nil) {
           logInfo("Submitting " + stage + " (" + stage.rdd + "), which has no missing parents")
+
+          // FIXME 这里其实会反复递归调用
+          // FIXME 直到最初的stage，它没有父stage了，那么就会去提交这个第一个stage，stage0
+          // FIXME 其余的stage，此时全部都在waitingStages里面
+          // FIXME missing = Nil，没有父stage了，则提交
           submitMissingTasks(stage, jobId.get)
+
+
         } else {
           for (parent <- missing) {
             // 递归调用，去提交父stage
@@ -869,10 +877,13 @@ class DAGScheduler(
     stage.pendingTasks.clear()
 
     // First figure out the indexes of partition ids to compute.
+    // fixme 获取要创建的task数量
     val partitionsToCompute: Seq[Int] = {
+      // fixme 如果stage是个实体，说明已经被处理了，获取他的partition数量
       if (stage.isShuffleMap) {
         (0 until stage.numPartitions).filter(id => stage.outputLocs(id) == Nil)
       } else {
+        // fixme 获取active job，但是没完成，的partition数量
         val job = stage.resultOfJob.get
         (0 until job.numPartitions).filter(id => !job.finished(id))
       }
@@ -885,6 +896,7 @@ class DAGScheduler(
       null
     }
 
+    // fixme 将stage加入到runningStages
     runningStages += stage
     // SparkListenerStageSubmitted should be posted before testing whether tasks are
     // serializable. If tasks are not serializable, a SparkListenerStageCompleted event
@@ -904,6 +916,7 @@ class DAGScheduler(
     try {
       // For ShuffleMapTask, serialize and broadcast (rdd, shuffleDep).
       // For ResultTask, serialize and broadcast (rdd, func).
+      // fixme 序列化stage中 rdd
       val taskBinaryBytes: Array[Byte] =
         if (stage.isShuffleMap) {
           closureSerializer.serialize((stage.rdd, stage.shuffleDep.get): AnyRef).array()
@@ -923,19 +936,30 @@ class DAGScheduler(
         return
     }
 
+    // fixme 为stage创建指定数量的task，这里最关键的一点是：task的最佳位置计算算法
     val tasks: Seq[Task[_]] = try {
       if (stage.isShuffleMap) {
         partitionsToCompute.map { id =>
+          // fixme 给每一个partition创建一个task ，给每个task计算最佳位置
+
+          // FIXME 位置优先算法，
+          // FIXME 位置优先算法
+          // FIXME 位置优先算法
           val locs = getPreferredLocs(stage.rdd, id)
+
           val part = stage.rdd.partitions(id)
+
+          // fixme 然后对finalStage之外的stage，他的isShuffleMap都是true，所以会创建一组ShuffleMapTask
           new ShuffleMapTask(stage.id, taskBinary, part, locs)
         }
       } else {
+        // fixme 如果不是shuffleMap，那么就是finalStage，finalStage，是创建ResultTask的
         val job = stage.resultOfJob.get
         partitionsToCompute.map { id =>
           val p: Int = job.partitions(id)
           val part = stage.rdd.partitions(p)
           val locs = getPreferredLocs(stage.rdd, p)
+          // fixme  partitionsToCompute.map返回一组ResultTask
           new ResultTask(stage.id, taskBinary, part, locs, id)
         }
       }
@@ -950,8 +974,14 @@ class DAGScheduler(
       logInfo("Submitting " + tasks.size + " missing tasks from " + stage + " (" + stage.rdd + ")")
       stage.pendingTasks ++= tasks
       logDebug("New pending tasks: " + stage.pendingTasks)
+
+
+      // fixme 最后针对stage的task，创建TaskSet对象，调用TaskScheduler的submitTask()方法，提交TaskSet
+      // fixme 默认情况下，standalone模式，是使用TaskSchedulerImpl，TaskScheduler只是一个trait
       taskScheduler.submitTasks(
         new TaskSet(tasks.toArray, stage.id, stage.newAttemptId(), stage.jobId, properties))
+
+
       stage.latestInfo.submissionTime = Some(clock.getTimeMillis())
     } else {
       // Because we posted SparkListenerStageSubmitted earlier, we should mark
@@ -1382,7 +1412,15 @@ class DAGScheduler(
     getPreferredLocsInternal(rdd, partition, new HashSet)
   }
 
-  /**
+  /** FIXME 计算每个task对应的partition最佳位置，
+    * FIXME 说白了，就是从stage的最后一个rdd开始，去找哪个rdd的partition，是被cache，或者checkpoint了，
+    * FIXME 那么，task的最佳位置，就是缓存的/checkpoint的partition位置
+    * FIXME task就在那个节点上执行，如果没有被cache/checkpoint，那么返回Nil
+    *
+    * FIXME 该算法仅仅返回partition是否被cache或者checkpoint，
+    * FIXME 如果是，返回对应的数据在文件系统中的getFileBlockLocations信息：比如checkpointRDD中对应代码：
+    * FIXME val locations = fs.getFileBlockLocations(status, 0, status.getLen)
+    *
     * Recursive implementation for getPreferredLocs.
     *
     * This method is thread-safe because it only accesses DAGScheduler state through thread-safe
@@ -1401,11 +1439,14 @@ class DAGScheduler(
       return Nil
     }
     // If the partition is cached, return the cache locations
+    // fixme 如果已经cache，返回cache的位置，获取一个rdd的RDDBlockId列表
     val cached = getCacheLocs(rdd)(partition)
     if (!cached.isEmpty) {
       return cached
     }
     // If the RDD has some placement preferences (as is the case for input RDDs), get those
+    // fixme 寻找当前rdd的partition是否被checkpoint，preferredLocations方法获取checkpoint数据RDDCheckpointData
+    // FIXME 回对应的数据在文件系统中的getFileBlockLocations信息
     val rddPrefs = rdd.preferredLocations(rdd.partitions(partition)).toList
     if (!rddPrefs.isEmpty) {
       return rddPrefs.map(TaskLocation(_))
@@ -1413,6 +1454,7 @@ class DAGScheduler(
     // If the RDD has narrow dependencies, pick the first partition of the first narrow dep
     // that has any placement preferences. Ideally we would choose based on transfer sizes,
     // but this will do for now.
+    // fixme 最后，递归调用自己，去寻找父rdd，看看对应的partition是否被缓存或者checpoint
     rdd.dependencies.foreach {
       case n: NarrowDependency[_] =>
         for (inPart <- n.getParents(partition)) {
@@ -1423,6 +1465,7 @@ class DAGScheduler(
         }
       case _ =>
     }
+    // fixme 如果这个stage，从最后一个rdd到最开始的rdd，partition都没有被缓存或者checkpoint，那么，task的最佳位置preferredLocas，就是Nil
     Nil
   }
 
@@ -1439,10 +1482,12 @@ class DAGScheduler(
 private[scheduler] class DAGSchedulerEventProcessLoop(dagScheduler: DAGScheduler)
   extends EventLoop[DAGSchedulerEvent]("dag-scheduler-event-loop") with Logging {
 
-  /**
+  /** FIXME 执行队列中的事件
     * The main event loop of the DAG scheduler.
     */
   override def onReceive(event: DAGSchedulerEvent): Unit = event match {
+
+    // FIXME 提交job，调用dagScheduler.hadleJobSubmitted入口方法
     case JobSubmitted(jobId, rdd, func, partitions, allowLocal, callSite, listener, properties) =>
       dagScheduler.handleJobSubmitted(jobId, rdd, func, partitions, allowLocal, callSite,
         listener, properties)

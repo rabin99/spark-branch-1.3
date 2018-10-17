@@ -101,27 +101,41 @@ class FileShuffleBlockManager(conf: SparkConf)
   private val metadataCleaner =
     new MetadataCleaner(MetadataCleanerType.SHUFFLE_BLOCK_MANAGER, this.cleanup, conf)
 
-  /**
+  /** FIXME 给每个map task获取一个ShuffleWriterGroup
    * Get a ShuffleWriterGroup for the given map task, which will register it as complete
    * when the writers are closed successfully
    */
   def forMapTask(shuffleId: Int, mapId: Int, numBuckets: Int, serializer: Serializer,
       writeMetrics: ShuffleWriteMetrics) = {
+    // fixme 方法内部就是构造一个ShuffleWriterGroup
     new ShuffleWriterGroup {
       shuffleStates.putIfAbsent(shuffleId, new ShuffleState(numBuckets))
       private val shuffleState = shuffleStates(shuffleId)
       private var fileGroup: ShuffleFileGroup = null
 
       val openStartTime = System.nanoTime
+
+      // FIXME 这里很关键，这里对应上面说的shuffle有2中模式，一种普通 ，一种是否开启consolidation，默认是false
+      // FIXME 如果开启了，那么不会给每个bucket获取一个独立的文件，而是为这个bucket，获取一个ShuffleGroup的writer
       val writers: Array[BlockObjectWriter] = if (consolidateShuffleFiles) {
         fileGroup = getUnusedFileGroup()
+        // Array.tabulate(生成Array长度)(Array元组)
         Array.tabulate[BlockObjectWriter](numBuckets) { bucketId =>
+          // FIXME 首先用shuffleId/mapID/bucketId生成唯一ShuffleBlockId
           val blockId = ShuffleBlockId(shuffleId, mapId, bucketId)
+
+          // FIXME 然后调用ShuffleFileGroup的apply函数，为bucket获取一个ShuffleFileGroup
+          // FIXME 在用BlockManager的getDiskWriter方法，针对ShuffleFileGroup获取一个Writer
+          // fixme 实际上，如果开启了consolidation整合机制，实际上对于每一个bucket都会获取一个针对ShuffleFileGroup的Writer，而不是
+          // fixme 一个独立的ShuffleBlockFile的Writer,这样就实现了多个ShuffleMapTask的输出数据的合并
           blockManager.getDiskWriter(blockId, fileGroup(bucketId), serializer, bufferSize,
             writeMetrics)
         }
       } else {
+
+        // FIXME 如果没有开启consolidation机制，就是普通的shuffle操作
         Array.tabulate[BlockObjectWriter](numBuckets) { bucketId =>
+          // 同样生成
           val blockId = ShuffleBlockId(shuffleId, mapId, bucketId)
           val blockFile = blockManager.diskBlockManager.getFile(blockId)
           // Because of previous failures, the shuffle file may already exist on this machine.

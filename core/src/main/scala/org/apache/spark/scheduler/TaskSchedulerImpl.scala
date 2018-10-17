@@ -18,50 +18,47 @@
 package org.apache.spark.scheduler
 
 import java.nio.ByteBuffer
-import java.util.{TimerTask, Timer}
 import java.util.concurrent.atomic.AtomicLong
+import java.util.{Timer, TimerTask}
 
+import org.apache.spark.TaskState.TaskState
+import org.apache.spark._
+import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
+import org.apache.spark.scheduler.TaskLocality.TaskLocality
+import org.apache.spark.storage.BlockManagerId
+import org.apache.spark.util.Utils
+
+import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.concurrent.duration._
-import scala.collection.mutable.ArrayBuffer
-import scala.collection.mutable.HashMap
-import scala.collection.mutable.HashSet
 import scala.language.postfixOps
 import scala.util.Random
 
-import org.apache.spark._
-import org.apache.spark.TaskState.TaskState
-import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
-import org.apache.spark.scheduler.TaskLocality.TaskLocality
-import org.apache.spark.util.Utils
-import org.apache.spark.executor.TaskMetrics
-import org.apache.spark.storage.BlockManagerId
-
 /**
-  * 1.底层通过操作一个SchedulerBackend，针对不同种类的cluster（standalone、yarn、mesor）调度task
-  * 2.它也可以通过使用一个LocalBackend，并且将isLocal参数设置为true，来在本地模式下工作
-  * 3.它负责处理一些通用逻辑，比如决定多个job的调度顺序，启动推测任务执行
-  * 4.客户端首先应调用它的initialize()方法和start()，然后通过runTasks()提交taskSets
+  * FIXME 1.底层通过操作一个SchedulerBackend，针对不同种类的cluster（standalone、yarn、mesor）调度task
+  * FIXME 2.它也可以通过使用一个LocalBackend，并且将isLocal参数设置为true，来在本地模式下工作
+  * FIXME 3.它负责处理一些通用逻辑，比如决定多个job的调度顺序，启动推测任务执行
+  * FIXME 4.客户端首先调用它的initialize()方法和start()，然后通过runTasks()提交taskSets
   *
- * Schedules tasks for multiple types of clusters by acting through a SchedulerBackend.
- * It can also work with a local setup by using a LocalBackend and setting isLocal to true.
- * It handles common logic, like determining a scheduling order across jobs, waking up to launch
- * speculative tasks, etc.
- *
- * Clients should first call initialize() and start(), then submit task sets through the
- * runTasks method.
- *
- * THREADING: SchedulerBackends and task-submitting clients can call this class from multiple
- * threads, so it needs locks in public API methods to maintain its state. In addition, some
- * SchedulerBackends synchronize on themselves when they want to send events here, and then
- * acquire a lock on us, so we need to make sure that we don't try to lock the backend while
- * we are holding a lock on ourselves.
- */
+  * Schedules tasks for multiple types of clusters by acting through a SchedulerBackend.
+  * It can also work with a local setup by using a LocalBackend and setting isLocal to true.
+  * It handles common logic, like determining a scheduling order across jobs, waking up to launch
+  * speculative tasks, etc.
+  *
+  * Clients should first call initialize() and start(), then submit task sets through the
+  * runTasks method.
+  *
+  * THREADING: SchedulerBackends and task-submitting clients can call this class from multiple
+  * threads, so it needs locks in public API methods to maintain its state. In addition, some
+  * SchedulerBackends synchronize on themselves when they want to send events here, and then
+  * acquire a lock on us, so we need to make sure that we don't try to lock the backend while
+  * we are holding a lock on ourselves.
+  */
 private[spark] class TaskSchedulerImpl(
-    val sc: SparkContext,
-    val maxTaskFailures: Int,
-    isLocal: Boolean = false)
-  extends TaskScheduler with Logging
-{
+                                        val sc: SparkContext,
+                                        val maxTaskFailures: Int,
+                                        isLocal: Boolean = false)
+  extends TaskScheduler with Logging {
   def this(sc: SparkContext) = this(sc, sc.conf.getInt("spark.task.maxFailures", 4))
 
   val conf = sc.conf
@@ -126,7 +123,8 @@ private[spark] class TaskSchedulerImpl(
   }
 
   /**
-    * TaskScheduler初始化SchedulerBackend，有2种调度Scheduler的方式FIFO,FAIR，其中Scheduler是Pool和TaskSetManager的父类
+    * FIXME TaskScheduler初始化SchedulerBackend，有2种调度Scheduler的方式FIFO,FAIR，其中Scheduler是Pool和TaskSetManager的父类
+    *
     * @param backend
     */
   def initialize(backend: SchedulerBackend) {
@@ -147,18 +145,20 @@ private[spark] class TaskSchedulerImpl(
   def newTaskId(): Long = nextTaskId.getAndIncrement()
 
   /**
-    * 最核心方法，其中backend.start()，把在Standalone模式下的SparkDeploySchedulerBackend启动。
-    * 其中backend是在TaskScheduler.initialize初始化传递过来的参数。
+    *  FIXME 最核心方法，其中backend.start()，把在Standalone模式下的SparkDeploySchedulerBackend启动。
+    * FIXME 其中backend是在TaskScheduler.initialize初始化传递过来的参数。
     */
   override def start() {
-    backend.start()
+    backend.start()  // fixme 启动backend
 
     if (!isLocal && conf.getBoolean("spark.speculation", false)) {
       logInfo("Starting speculative execution thread")
       import sc.env.actorSystem.dispatcher
       sc.env.actorSystem.scheduler.schedule(SPECULATION_INTERVAL milliseconds,
-            SPECULATION_INTERVAL milliseconds) {
-        Utils.tryOrExit { checkSpeculatableTasks() }
+        SPECULATION_INTERVAL milliseconds) {
+        Utils.tryOrExit {
+          checkSpeculatableTasks()
+        }
       }
     }
   }
@@ -167,11 +167,19 @@ private[spark] class TaskSchedulerImpl(
     waitBackendReady()
   }
 
+
+  // FIXME  TaskScheduler 提交
   override def submitTasks(taskSet: TaskSet) {
+    // 这是一个 Array[Task[_]]
     val tasks = taskSet.tasks
     logInfo("Adding task set " + taskSet.id + " with " + tasks.length + " tasks")
     this.synchronized {
+
+      // fixme 给每一个TaskSet创建一个TaskSetmanager
+      // fixme TaskSetManager，负责它的那个TaskSet的任务执行状况的监视和管理
       val manager = createTaskSetManager(taskSet, maxTaskFailures)
+
+      // fixme 然后加入内存缓存
       activeTaskSets(taskSet.id) = manager
       schedulableBuilder.addTaskSetManager(manager, manager.taskSet.properties)
 
@@ -190,13 +198,17 @@ private[spark] class TaskSchedulerImpl(
       }
       hasReceivedTask = true
     }
+    // fixme sparkContext中，创建TaskScheduler的时候，一件非常重要的事情，
+    // fixme 就是为TaskSchedulerImpl创建一个SparkDeploySchedulerBackend，
+    // fixme 这里backend就是之前创建好的SparkDeploySchedulerBackend，
+    // fixme 而且这个backend是负责创建AppClient，向Master注册Application的
     backend.reviveOffers()
   }
 
   // Label as private[scheduler] to allow tests to swap in different task set managers if necessary
   private[scheduler] def createTaskSetManager(
-      taskSet: TaskSet,
-      maxTaskFailures: Int): TaskSetManager = {
+                                               taskSet: TaskSet,
+                                               maxTaskFailures: Int): TaskSetManager = {
     new TaskSetManager(this, taskSet, maxTaskFailures)
   }
 
@@ -219,10 +231,10 @@ private[spark] class TaskSchedulerImpl(
   }
 
   /**
-   * Called to indicate that all task attempts (including speculated tasks) associated with the
-   * given TaskSetManager have completed, so state associated with the TaskSetManager should be
-   * cleaned up.
-   */
+    * Called to indicate that all task attempts (including speculated tasks) associated with the
+    * given TaskSetManager have completed, so state associated with the TaskSetManager should be
+    * cleaned up.
+    */
   def taskSetFinished(manager: TaskSetManager): Unit = synchronized {
     activeTaskSets -= manager.taskSet.id
     manager.parent.removeSchedulable(manager)
@@ -231,19 +243,30 @@ private[spark] class TaskSchedulerImpl(
   }
 
   private def resourceOfferSingleTaskSet(
-      taskSet: TaskSetManager,
-      maxLocality: TaskLocality,
-      shuffledOffers: Seq[WorkerOffer],
-      availableCpus: Array[Int],
-      tasks: Seq[ArrayBuffer[TaskDescription]]) : Boolean = {
+                                          taskSet: TaskSetManager,
+                                          maxLocality: TaskLocality,
+                                          shuffledOffers: Seq[WorkerOffer],
+                                          availableCpus: Array[Int],
+                                          tasks: Seq[ArrayBuffer[TaskDescription]]): Boolean = {
     var launchedTask = false
+    // fixme 遍历所有executor
     for (i <- 0 until shuffledOffers.size) {
       val execId = shuffledOffers(i).executorId
       val host = shuffledOffers(i).host
+      // fixme 如果当前executor的cpu数量大于每个task要使用的cpu数量，
+      // fixme 这里也就是一个executor可以运行几个task，默认一个task只需要一个cpu，那么executor有几个cpu就能执行几个task
       if (availableCpus(i) >= CPUS_PER_TASK) {
         try {
+
+          // fixme 调用TaskManager的resourceOffer方法，去找到，在这个executor上，就用这种本地化级别，TaskSet中哪些task可用启动
+          // fixme 遍历使用当前本地化级别，可用在该executor上启动的task，Taskset是TaskSetManager类型
           for (task <- taskSet.resourceOffer(execId, host, maxLocality)) {
+
+            // fixme 放入tasks这个二位数组，给指定的executor加上要启动的task
             tasks(i) += task
+            // FIXME 到这里为止，就是task分配算法
+            // fixme 尝试使用本地级别这种模型，去优化task的分配和启动，优先希望在最佳本地级别启动task
+            // fixme 然后，将task分配给executor，将相应的分配信息加入到内存缓存
             val tid = task.taskId
             taskIdToTaskSetId(tid) = taskSet.taskSet.id
             taskIdToExecutorId(tid) = execId
@@ -265,13 +288,15 @@ private[spark] class TaskSchedulerImpl(
   }
 
   /**
-   * Called by cluster manager to offer resources on slaves. We respond by asking our active task
-   * sets for tasks in order of priority. We fill each node with tasks in a round-robin manner so
-   * that tasks are balanced across the cluster.
-   */
+    * FIXME Task任务分配算法：遍历所有executor，以最优的级别运行task，如果可以就运行，返回对应的executorid，否则放大本地级别，然后继续遍历executor
+    * Called by cluster manager to offer resources on slaves. We respond by asking our active task
+    * sets for tasks in order of priority. We fill each node with tasks in a round-robin manner so
+    * that tasks are balanced across the cluster.
+    */
   def resourceOffers(offers: Seq[WorkerOffer]): Seq[Seq[TaskDescription]] = synchronized {
     // Mark each slave as alive and remember its hostname
     // Also track if new executor is added
+    // fixme WorkerOffer代表executor上可用的资源，cpu数量
     var newExecAvail = false
     for (o <- offers) {
       executorIdToHost(o.executorId) = o.host
@@ -287,14 +312,24 @@ private[spark] class TaskSchedulerImpl(
     }
 
     // Randomly shuffle offers to avoid always placing tasks on the same set of workers.
+    // fixme 首先将可用的executor进行shuffle，进行打散，从而做到，尽量可用进行负载均衡
     val shuffledOffers = Random.shuffle(offers)
     // Build a list of tasks to assign to each worker.
+    // fixme 然后针对WorkerOffer，创建一堆需要用的东西，比如task，很重要，可用理解为一个二位数据ArrayBuffer，元素又是一个ArrayBuffer
+    // fixme 并且每个子ArrayBuffer的数量是固定的，也就是这个executor可用的cpu数量
     val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.cores))
     val availableCpus = shuffledOffers.map(o => o.cores).toArray
+
+    // fixme 从roolpool中取出排序的TaskSet
+    // fixme 在SparkContext初始化的时候，创建完TaskSchedulerImpl、SparkDeploySchedulerBackend后执行initialize()，
+    // fixme 在该方法中创建了一个调度池，查看本类中130行，rootPool = new Pool("", schedulingMode, 0, 0),
+    // fixme 然后在执行task分配算法的时候，会从这个调度池中，取出排队号的TaskSet
     val sortedTaskSets = rootPool.getSortedTaskSetQueue
+
     for (taskSet <- sortedTaskSets) {
       logDebug("parentName: %s, name: %s, runningTasks: %s".format(
         taskSet.parent.name, taskSet.name, taskSet.runningTasks))
+
       if (newExecAvail) {
         taskSet.executorAdded()
       }
@@ -303,11 +338,24 @@ private[spark] class TaskSchedulerImpl(
     // Take each TaskSet in our scheduling order, and then offer it each node in increasing order
     // of locality levels so that it gets a chance to launch local tasks on all of them.
     // NOTE: the preferredLocality order: PROCESS_LOCAL, NODE_LOCAL, NO_PREF, RACK_LOCAL, ANY
+    // FIXME 任务分配算法核心：
+    // FIXME 双重for，遍历所有TaskSet，遍历所有可用executor，以最优的级别去运行如果可以运行就使用最优级别，否则方法级别
+    // fixme 本地化级别有：从小到大，从优到劣：PROCESS_LOCAL, NODE_LOCAL, NO_PREF, RACK_LOCAL, ANY
+    // fixme process_local进程本地化：rdd的partition和task，进入一个executor
+    // fixme node_local 节点本地化：rdd的partition和task，不在一个executor，但是在一个worker节点
+    // fixme no_pref 无，没有所谓的本地化级别
+    // fixme rack_local 机架本地化：rdd的partition和task，在一个机架上
+    // fixme any：任意的本地化级别，
+
     var launchedTask = false
+    // FIXME 对每个TaskSet，从最优一种本地化级别，开始遍历，每次不成功，则本地级别会加1
     for (taskSet <- sortedTaskSets; maxLocality <- taskSet.myLocalityLevels) {
       do {
+        // fixme 对当前TaskSet，尝试使用最小的本地级别，将TaskSet的task，在executor上启动，如果启动不了，就跳出这个do while循环
+        // fixme 进入下一种本地化级别，以此类推，知道尝试将TaskSet在某些本地化级别下，让task在executor上全部启动
         launchedTask = resourceOfferSingleTaskSet(
-            taskSet, maxLocality, shuffledOffers, availableCpus, tasks)
+          // fixme 参数：taskSet，taskSet对应的Array本地级别，可用的打散后的executor，可用executor对应的可用cpu，对应的tasks
+          taskSet, maxLocality, shuffledOffers, availableCpus, tasks)
       } while (launchedTask)
     }
 
@@ -321,8 +369,10 @@ private[spark] class TaskSchedulerImpl(
     var failedExecutor: Option[String] = None
     synchronized {
       try {
+        // FIXME 如果task是lost，因为各种原因执行失败
         if (state == TaskState.LOST && taskIdToExecutorId.contains(tid)) {
           // We lost this entire executor, so remember that it's gone
+          // fixme 这里就会移除executor，将它加入失败队列
           val execId = taskIdToExecutorId(tid)
           if (activeExecutorIds.contains(execId)) {
             removeExecutor(execId)
@@ -330,7 +380,9 @@ private[spark] class TaskSchedulerImpl(
           }
         }
         taskIdToTaskSetId.get(tid) match {
+            // fixme 获取对应TaskSet
           case Some(taskSetId) =>
+            // fixme 如果task结束了，从内存缓存中移除
             if (TaskState.isFinished(state)) {
               taskIdToTaskSetId.remove(tid)
               taskIdToExecutorId.remove(tid)
@@ -338,6 +390,7 @@ private[spark] class TaskSchedulerImpl(
             activeTaskSets.get(taskSetId).foreach { taskSet =>
               if (state == TaskState.FINISHED) {
                 taskSet.removeRunningTask(tid)
+                // fixme 如果正常结束，也做相应处理
                 taskResultGetter.enqueueSuccessfulTask(taskSet, tid, serializedData)
               } else if (Set(TaskState.FAILED, TaskState.KILLED, TaskState.LOST).contains(state)) {
                 taskSet.removeRunningTask(tid)
@@ -347,8 +400,8 @@ private[spark] class TaskSchedulerImpl(
           case None =>
             logError(
               ("Ignoring update with state %s for TID %s because its task set is gone (this is " +
-               "likely the result of receiving duplicate task finished status updates)")
-              .format(state, tid))
+                "likely the result of receiving duplicate task finished status updates)")
+                .format(state, tid))
         }
       } catch {
         case e: Exception => logError("Exception in statusUpdate", e)
@@ -362,14 +415,14 @@ private[spark] class TaskSchedulerImpl(
   }
 
   /**
-   * Update metrics for in-progress tasks and let the master know that the BlockManager is still
-   * alive. Return true if the driver knows about the given block manager. Otherwise, return false,
-   * indicating that the block manager should re-register.
-   */
+    * Update metrics for in-progress tasks and let the master know that the BlockManager is still
+    * alive. Return true if the driver knows about the given block manager. Otherwise, return false,
+    * indicating that the block manager should re-register.
+    */
   override def executorHeartbeatReceived(
-      execId: String,
-      taskMetrics: Array[(Long, TaskMetrics)], // taskId -> TaskMetrics
-      blockManagerId: BlockManagerId): Boolean = {
+                                          execId: String,
+                                          taskMetrics: Array[(Long, TaskMetrics)], // taskId -> TaskMetrics
+                                          blockManagerId: BlockManagerId): Boolean = {
 
     val metricsWithStageIds: Array[(Long, Int, Int, TaskMetrics)] = synchronized {
       taskMetrics.flatMap { case (id, metrics) =>
@@ -386,17 +439,17 @@ private[spark] class TaskSchedulerImpl(
   }
 
   def handleSuccessfulTask(
-    taskSetManager: TaskSetManager,
-    tid: Long,
-    taskResult: DirectTaskResult[_]) = synchronized {
+                            taskSetManager: TaskSetManager,
+                            tid: Long,
+                            taskResult: DirectTaskResult[_]) = synchronized {
     taskSetManager.handleSuccessfulTask(tid, taskResult)
   }
 
   def handleFailedTask(
-    taskSetManager: TaskSetManager,
-    tid: Long,
-    taskState: TaskState,
-    reason: TaskEndReason) = synchronized {
+                        taskSetManager: TaskSetManager,
+                        tid: Long,
+                        taskState: TaskState,
+                        reason: TaskEndReason) = synchronized {
     taskSetManager.handleFailedTask(tid, taskState, reason)
     if (!taskSetManager.isZombie && taskState != TaskState.KILLED) {
       // Need to revive offers again now that the task set manager state has been updated to
@@ -459,11 +512,11 @@ private[spark] class TaskSchedulerImpl(
         removeExecutor(executorId)
         failedExecutor = Some(executorId)
       } else {
-         // We may get multiple executorLost() calls with different loss reasons. For example, one
-         // may be triggered by a dropped connection from the slave while another may be a report
-         // of executor termination from Mesos. We produce log messages for both so we eventually
-         // report the termination reason.
-         logError("Lost an executor " + executorId + " (already removed): " + reason)
+        // We may get multiple executorLost() calls with different loss reasons. For example, one
+        // may be triggered by a dropped connection from the slave while another may be a report
+        // of executor termination from Mesos. We produce log messages for both so we eventually
+        // report the termination reason.
+        logError("Lost an executor " + executorId + " (already removed): " + reason)
       }
     }
     // Call dagScheduler.executorLost without holding the lock on this to prevent deadlock
@@ -533,17 +586,17 @@ private[spark] class TaskSchedulerImpl(
 
 private[spark] object TaskSchedulerImpl {
   /**
-   * Used to balance containers across hosts.
-   *
-   * Accepts a map of hosts to resource offers for that host, and returns a prioritized list of
-   * resource offers representing the order in which the offers should be used.  The resource
-   * offers are ordered such that we'll allocate one container on each host before allocating a
-   * second container on any host, and so on, in order to reduce the damage if a host fails.
-   *
-   * For example, given <h1, [o1, o2, o3]>, <h2, [o4]>, <h1, [o5, o6]>, returns
-   * [o1, o5, o4, 02, o6, o3]
-   */
-  def prioritizeContainers[K, T] (map: HashMap[K, ArrayBuffer[T]]): List[T] = {
+    * Used to balance containers across hosts.
+    *
+    * Accepts a map of hosts to resource offers for that host, and returns a prioritized list of
+    * resource offers representing the order in which the offers should be used.  The resource
+    * offers are ordered such that we'll allocate one container on each host before allocating a
+    * second container on any host, and so on, in order to reduce the damage if a host fails.
+    *
+    * For example, given <h1, [o1, o2, o3]>, <h2, [o4]>, <h1, [o5, o6]>, returns
+    * [o1, o5, o4, 02, o6, o3]
+    */
+  def prioritizeContainers[K, T](map: HashMap[K, ArrayBuffer[T]]): List[T] = {
     val _keyList = new ArrayBuffer[K](map.size)
     _keyList ++= map.keys
 
@@ -562,7 +615,7 @@ private[spark] object TaskSchedulerImpl {
         val containerList: ArrayBuffer[T] = map.get(key).getOrElse(null)
         assert(containerList != null)
         // Get the index'th entry for this host - if present
-        if (index < containerList.size){
+        if (index < containerList.size) {
           retval += containerList.apply(index)
           found = true
         }

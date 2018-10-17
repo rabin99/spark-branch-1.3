@@ -124,9 +124,13 @@ private[spark] class Executor(
       attemptNumber: Int,
       taskName: String,
       serializedTask: ByteBuffer) {
+    // FIXME 每个task都会创建一个TaskRunner，TaskRunner是个多线程
     val tr = new TaskRunner(context, taskId = taskId, attemptNumber = attemptNumber, taskName,
       serializedTask)
+    // 将TaskRunner放入内存缓存中
     runningTasks.put(taskId, tr)
+    // fixme 将task封装在一个线程中TaskRunner，并加入到线程池中，线程池需要排队
+    // fixme newDaemonCachedThreadPool底层newCachedThreadPool，如果新加任务不能执行，那么抛出异常
     threadPool.execute(tr)
   }
 
@@ -149,6 +153,9 @@ private[spark] class Executor(
 
   private def gcTime = ManagementFactory.getGarbageCollectorMXBeans.map(_.getCollectionTime).sum
 
+  /*
+   * FIXME 从TaskRunner开始就是Task运行的工作原理，多线程
+   */
   class TaskRunner(
       execBackend: ExecutorBackend,
       val taskId: Long,
@@ -180,8 +187,13 @@ private[spark] class Executor(
       startGCTime = gcTime
 
       try {
+        // fixme 对序列化的task数据，进行反序列化
         val (taskFiles, taskJars, taskBytes) = Task.deserializeWithDependencies(serializedTask)
+
+        // fixme 然后通过网络通信，将需要的文件、资源、jar拷贝过来
         updateDependencies(taskFiles, taskJars)
+
+        // fixme 最后通过反序列化，将整个task的数据集反序列化
         task = ser.deserialize[Task[Any]](taskBytes, Thread.currentThread.getContextClassLoader)
 
         // If this task has been killed before we deserialized it, let's quit now. Otherwise,
@@ -199,8 +211,12 @@ private[spark] class Executor(
         env.mapOutputTracker.updateEpoch(task.epoch)
 
         // Run the actual task and measure its runtime.
+        // fixme 计算task开始时间
         taskStart = System.currentTimeMillis()
+        // FIXME 使用run方法运行，这个value对于ShuffleMapTask来说就是MapStatus，封装了ShuffleMapTask计算的数据输出位置
+        // FIXME 后面如果还是一个ShuffleMapTask，那么就会联系MapOutputTracker，来获取上个ShuffleMapTask的输出位置，通过网络拉取数据，ResultTask也一样
         val value = task.run(taskAttemptId = taskId, attemptNumber = attemptNumber)
+        // fixme 计算出task结束时间
         val taskFinish = System.currentTimeMillis()
 
         // If the task has been killed, let's fail it.
@@ -210,9 +226,12 @@ private[spark] class Executor(
 
         val resultSer = env.serializer.newInstance()
         val beforeSerialization = System.currentTimeMillis()
+
+        // FIXME 对MapStatus进行各种序列化和封装，因为后面要通过网络发送给Driver
         val valueBytes = resultSer.serialize(value)
         val afterSerialization = System.currentTimeMillis()
 
+        // fixme 运行的统计信息，在SparkUI上可用查看到
         for (m <- task.metrics) {
           m.setExecutorDeserializeTime(taskStart - deserializeStartTime)
           m.setExecutorRunTime(taskFinish - taskStart)
@@ -246,6 +265,7 @@ private[spark] class Executor(
           }
         }
 
+        // FIXME 核心方法，调用Executor所在的CoarseGrainedExecutorBackend的statusUpdate()方法
         execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
 
       } catch {
@@ -348,13 +368,16 @@ private[spark] class Executor(
     }
   }
 
-  /**
+  /** FIXME
    * Download any missing dependencies if we receive a new set of files and JARs from the
    * SparkContext. Also adds any new JARs we fetched to the class loader.
    */
   private def updateDependencies(newFiles: HashMap[String, Long], newJars: HashMap[String, Long]) {
     lazy val hadoopConf = SparkHadoopUtil.get.newConfiguration(conf)
+
+    // FIXME synchronized：因为task在一个CoarseGrainedExecutorBackend进程内并发运行，因为里面多线程访问共享资源，如currentFiles，currentJars等
     synchronized {
+      // FIXME 遍历要拉去的文件，通过Utils的fetchFile()方法，通过网络通信，从远程拉去文件
       // Fetch missing dependencies
       for ((name, timestamp) <- newFiles if currentFiles.getOrElse(name, -1L) < timestamp) {
         logInfo("Fetching " + name + " with timestamp " + timestamp)
@@ -363,6 +386,8 @@ private[spark] class Executor(
           env.securityManager, hadoopConf, timestamp, useCache = !isLocal)
         currentFiles(name) = timestamp
       }
+
+      // FIXME 遍历要拉去的jar，判断下时间戳，要求jar当前时间戳必须小于目标时间戳，通过Utils的fetchFile()方法拉取jar
       for ((name, timestamp) <- newJars) {
         val localName = name.split("/").last
         val currentTimeStamp = currentJars.get(name)

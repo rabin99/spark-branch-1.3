@@ -31,6 +31,9 @@ private[spark] class MapPartitionsRDD[U: ClassTag, T: ClassTag](
 
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
+  // FIXME computer实际上，就是针对RDD中某个partition执行用户定义的算子和函数
+  // FIXME f函数是Spark封装了用户自定义的算子和函数，还实现了其他逻辑
+  // FIXME 到这里为此，其实就是在针对rdd的partition执行自定义的计算操作，并返回新的RDD的partition数据
   override def compute(split: Partition, context: TaskContext) =
     f(context, split.index, firstParent[T].iterator(split, context))
 }

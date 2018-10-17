@@ -60,6 +60,7 @@ private[spark] object CoarseGrainedClusterMessages {
   }
 
   // Internal messages in driver
+  // FIXME Driver内部通信消息
   case object ReviveOffers extends CoarseGrainedClusterMessage
 
   case object StopDriver extends CoarseGrainedClusterMessage

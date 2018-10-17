@@ -22,7 +22,7 @@ import java.util.Properties
 import org.apache.spark.TaskContext
 import org.apache.spark.util.CallSite
 
-/**
+/**  FIXME 在DAGScheduler中跟踪一个active的job信息
  * Tracks information about an active job in the DAGScheduler.
  */
 private[spark] class ActiveJob(

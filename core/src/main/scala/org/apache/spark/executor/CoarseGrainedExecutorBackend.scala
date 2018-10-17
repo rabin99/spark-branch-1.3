@@ -35,6 +35,7 @@ import org.apache.spark.scheduler.TaskDescription
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.util.{ActorLogReceive, AkkaUtils, SignalLogger, Utils}
 
+// FIXME worker中为application启动executor，实际上是启动CoarseGrainedExecutorBackend
 private[spark] class CoarseGrainedExecutorBackend(
     driverUrl: String,
     executorId: String,
@@ -49,9 +50,12 @@ private[spark] class CoarseGrainedExecutorBackend(
   var executor: Executor = null
   var driver: ActorSelection = null
 
+  // FIXME 在actor的初始化方法中
   override def preStart() {
     logInfo("Connecting to driver: " + driverUrl)
+    // fixme 获取driver的actor
     driver = context.actorSelection(driverUrl)
+    // fixme 向driver发送RegisterExecutor
     driver ! RegisterExecutor(executorId, hostPort, cores, extractLogUrls)
     context.system.eventStream.subscribe(self, classOf[RemotingLifecycleEvent])
   }
@@ -63,6 +67,10 @@ private[spark] class CoarseGrainedExecutorBackend(
   }
 
   override def receiveWithLogging = {
+
+    // FIXME driver注册executor成功之后，会发送registerExecutor消息
+    // FIXME 此时CoarseGrainedExecutorBackend会创建Executor对象，作为执行句柄
+    // FIXME 其他大部分功能，都是通过executor实现的
     case RegisteredExecutor =>
       logInfo("Successfully registered with driver")
       val (hostname, _) = Utils.parseHostPort(hostPort)
@@ -72,14 +80,19 @@ private[spark] class CoarseGrainedExecutorBackend(
       logError("Slave registration failed: " + message)
       System.exit(1)
 
+      // FIXME 启动Task
     case LaunchTask(data) =>
       if (executor == null) {
         logError("Received LaunchTask command but executor was null")
         System.exit(1)
       } else {
         val ser = env.closureSerializer.newInstance()
+
+        // fixme 反序列化task
         val taskDesc = ser.deserialize[TaskDescription](data.value)
         logInfo("Got assigned task " + taskDesc.taskId)
+
+        // fixme 用内部的执行句柄executor的launchTasks()来启动一个Task
         executor.launchTask(this, taskId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
           taskDesc.name, taskDesc.serializedTask)
       }
@@ -107,6 +120,7 @@ private[spark] class CoarseGrainedExecutorBackend(
       context.system.shutdown()
   }
 
+  // FIXME 发送StatusUpdate消息给CoarseGrainedSchedulerBackend
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
     driver ! StatusUpdate(executorId, taskId, state, data)
   }

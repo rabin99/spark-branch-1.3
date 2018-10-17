@@ -52,6 +52,9 @@ private[spark] abstract class Task[T](val stageId: Int, var partitionId: Int) ex
    * @return the result of the task
    */
   final def run(taskAttemptId: Long, attemptNumber: Int): T = {
+
+    // FIXME 创建一个TaskContext,task执行上下文，里面记录了task执行的一些全局性数据
+    // FIXME 比如task重试了几次，包括task属于哪个stage，task要处理的是rdd的哪个partition等等
     context = new TaskContextImpl(stageId = stageId, partitionId = partitionId,
       taskAttemptId = taskAttemptId, attemptNumber = attemptNumber, runningLocally = false)
     TaskContextHelper.setTaskContext(context)
@@ -61,6 +64,7 @@ private[spark] abstract class Task[T](val stageId: Int, var partitionId: Int) ex
       kill(interruptThread = false)
     }
     try {
+      // fixme 调用抽象方法
       runTask(context)
     } finally {
       context.markTaskCompleted()

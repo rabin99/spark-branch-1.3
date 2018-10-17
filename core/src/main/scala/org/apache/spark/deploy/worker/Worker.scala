@@ -331,7 +331,7 @@ private[spark] class Worker(
       logInfo(s"Master with url $masterUrl requested this worker to reconnect.")
       registerWithMaster()
 
-      // fixme 启动executor
+    // FIXME 启动executor
     case LaunchExecutor(masterUrl, appId, execId, appDesc, cores_, memory_) =>
       if (masterUrl != activeMasterUrl) {
         logWarning("Invalid Master (" + masterUrl + ") attempted to launch executor.")
@@ -428,7 +428,7 @@ private[spark] class Worker(
       }
 
     /**
-      *  Fixme 启动Driver，调用DriverRunner.start(),start内部封装了一个Thread，多线程启动Driver
+      *  FIXME 启动Driver，调用DriverRunner.start(),start内部封装了一个Thread，多线程启动Driver
       */
     case LaunchDriver(driverId, driverDesc) => {
       logInfo(s"Asked to launch driver $driverId")
@@ -442,6 +442,7 @@ private[spark] class Worker(
         akkaUrl)
       drivers(driverId) = driver
 
+      // FIXME Driver start...
       driver.start()
 
       coresUsed += driverDesc.cores

@@ -42,9 +42,7 @@ private[spark] class SparkDeploySchedulerBackend(
   val maxCores = conf.getOption("spark.cores.max").map(_.toInt)
   val totalExpectedCores = maxCores.getOrElse(0)
 
-  /**
-    * 一些参数的加载
-    */
+  // FIXME 一些参数的加载
   override def start() {
     super.start()
 
@@ -86,11 +84,11 @@ private[spark] class SparkDeploySchedulerBackend(
       args, sc.executorEnvs, classPathEntries ++ testingClassPath, libraryPathEntries, javaOpts)
     val appUIAddress = sc.ui.map(_.appUIAddress).getOrElse("")
 
-    // appDesc包含了application运行的信息，如需要多少cpu 、每个slave需要的内存
+    // fixme appDesc包含了application运行的信息，如需要多少cpu 、每个slave需要的内存
     val appDesc = new ApplicationDescription(sc.appName, maxCores, sc.executorMemory, command,
       appUIAddress, sc.eventLogDir, sc.eventLogCodec)
 
-    // 创建了Appclient
+    // FIXME 创建了Appclient
     client = new AppClient(sc.env.actorSystem, masters, appDesc, this, conf)
     client.start()
 
@@ -155,7 +153,7 @@ private[spark] class SparkDeploySchedulerBackend(
     }
 
   /**
-    * start方法中调用，该方法使用一个registrationLock = new Object（）作为锁，
+    * fixme start方法中调用，该方法使用一个registrationLock = new Object（）作为锁，
     * 如果已经连接到集群，则registrationDone = true，否则false。
     * 连接到集群后，这个while则不会执行，否则，如果提交的作业没有连接到集群，那么这个start方法会进入等待状态。
     */

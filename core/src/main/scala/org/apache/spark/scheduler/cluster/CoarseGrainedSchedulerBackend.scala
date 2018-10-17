@@ -71,6 +71,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   // Executors we have requested the cluster manager to kill that have not died yet
   private val executorsPendingToRemove = new HashSet[String]
 
+  // FIXME DriverActor对象
   class DriverActor(sparkProperties: Seq[(String, String)]) extends Actor with ActorLogReceive {
     override protected def log = CoarseGrainedSchedulerBackend.this.log
     private val addressToExecutorId = new HashMap[Address, String]
@@ -86,6 +87,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     }
 
     def receiveWithLogging = {
+
+      // fixme 注册executor
       case RegisterExecutor(executorId, hostPort, cores, logUrls) =>
         Utils.checkHostPort(hostPort, "Host port expected " + hostPort)
         if (executorDataMap.contains(executorId)) {
@@ -113,7 +116,10 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           makeOffers()
         }
 
+        // fixme 更新状态，处理Task执行结束的事件
       case StatusUpdate(executorId, taskId, state, data) =>
+
+        // fixme schdduler更新task状态
         scheduler.statusUpdate(taskId, state, data.value)
         if (TaskState.isFinished(state)) {
           executorDataMap.get(executorId) match {
@@ -127,6 +133,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           }
         }
 
+        // fixme 接收接收请求，调用makeOffers处理
       case ReviveOffers =>
         makeOffers()
 
@@ -163,10 +170,20 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     }
 
     // Make fake resource offers on all executors
+    // FIXME 处理driver发送过来的请求，来处理TaskSet
     def makeOffers() {
-      launchTasks(scheduler.resourceOffers(executorDataMap.map { case (id, executorData) =>
-        new WorkerOffer(id, executorData.executorHost, executorData.freeCores)
-      }.toSeq))
+      /**
+        * fixme 第一步，调用TaskSchedulerImpl的resourceOffers方法，执行任务分配算法，将各个task分配到executor上
+        * fixme 第二步，分配好task到executor之后，执行自己的launchTasks()方法，将分配的task发送LaunchTask消息
+        * fixme 到对应的executor上，由executor启动并执行task
+        *
+        * fixme 给resourceOffers方法传入的是什么？
+        * fixme 传入的是这个Application所有可用的executor，并且将其封装成WorkerOffer，
+        * fixme 每个WorkerOffer代表了每个executor可用的cpu资源数量
+        */
+      launchTasks(
+        scheduler.resourceOffers(executorDataMap.map { case (id, executorData) => new WorkerOffer(id, executorData.executorHost, executorData.freeCores)}.toSeq)
+      )
     }
 
     // Make fake resource offers on just one executor
@@ -199,6 +216,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         else {
           val executorData = executorDataMap(task.executorId)
           executorData.freeCores -= scheduler.CPUS_PER_TASK
+
+          // FIXME 发送消息给executor启动Task
           executorData.executorActor ! LaunchTask(new SerializableBuffer(serializedTask))
         }
       }
@@ -237,6 +256,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     }
     // TODO (prashant) send conf instead of properties
     driverActor = actorSystem.actorOf(
+      // FIXME ...发送conf，替代properties
       Props(new DriverActor(properties)), name = CoarseGrainedSchedulerBackend.ACTOR_NAME)
   }
 
@@ -267,6 +287,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   }
 
   override def reviveOffers() {
+    // fixme driver内部发送信息，本类中receiveWithLogging中定义了case匹配模式来接受处理。
     driverActor ! ReviveOffers
   }
 

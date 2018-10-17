@@ -24,10 +24,10 @@ import scala.util.control.NonFatal
 
 import org.apache.spark.Logging
 
-/**
+/* FIXME ExentLoop接收事件到eventQueue队列中，将启动一个单独的事件线程启动他
  * An event loop to receive events from the caller and process all events in the event thread. It
  * will start an exclusive event thread to process all events.
- *
+ * FIXME 这个队列长度是Integer.MAXVALUE,所以需要确保onReceive方法能及时处理掉，否则可能会OOM
  * Note: The event queue will grow indefinitely. So subclasses should make sure `onReceive` can
  * handle events in time to avoid the potential OOM.
  */
@@ -118,7 +118,7 @@ private[spark] abstract class EventLoop[E](name: String) extends Logging {
    */
   protected def onStop(): Unit = {}
 
-  /**
+  /** FIXME 从事件队列中轮询事件时，在事件线程中调用。
    * Invoked in the event thread when polling events from the event queue.
    *
    * Note: Should avoid calling blocking actions in `onReceive`, or the event thread will be blocked

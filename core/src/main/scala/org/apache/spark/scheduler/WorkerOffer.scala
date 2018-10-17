@@ -18,6 +18,7 @@
 package org.apache.spark.scheduler
 
 /**
+  * FIXME 代表一个executor上可用的资源
  * Represents free resources available on an executor.
  */
 private[spark]

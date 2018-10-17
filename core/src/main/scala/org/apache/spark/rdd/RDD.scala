@@ -106,6 +106,7 @@ abstract class RDD[T: ClassTag](
    * :: DeveloperApi ::
    * Implemented by subclasses to compute a given partition.
    */
+  // FIXME 查看实现类 以MapPartitionsRDD为例
   @DeveloperApi
   def compute(split: Partition, context: TaskContext): Iterator[T]
 
@@ -223,6 +224,7 @@ abstract class RDD[T: ClassTag](
   }
 
   /**
+    * FIXME 获取分区的首选位置，考虑RDD是否被checkpointed
    * Get the preferred locations of a partition, taking into account whether the
    * RDD is checkpointed.
    */
@@ -238,9 +240,11 @@ abstract class RDD[T: ClassTag](
    * subclasses of RDD.
    */
   final def iterator(split: Partition, context: TaskContext): Iterator[T] = {
+    // FIXME CacheManager
     if (storageLevel != StorageLevel.NONE) {
       SparkEnv.get.cacheManager.getOrCompute(this, split, context, storageLevel)
     } else {
+      // FIXME 进行rdd partition 的计算
       computeOrReadCheckpoint(split, context)
     }
   }
@@ -274,6 +278,7 @@ abstract class RDD[T: ClassTag](
    */
   private[spark] def computeOrReadCheckpoint(split: Partition, context: TaskContext): Iterator[T] =
   {
+    // FIXME checkpoint。。。
     if (isCheckpointed) firstParent[T].iterator(split, context) else compute(split, context)
   }
 

@@ -26,7 +26,9 @@ import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.shuffle.ShuffleWriter
 
-/**
+/*
+  * FIXME 一个ShuffleMapTask会将一个Rdd元素切分为多个bucket
+  * FIXME 基于一个在ShuffleDependency中指定的partitioner，默认技术HashPartition
 * A ShuffleMapTask divides the elements of an RDD into multiple buckets (based on a partitioner
 * specified in the ShuffleDependency).
 *
@@ -55,6 +57,9 @@ private[spark] class ShuffleMapTask(
   }
 
   override def runTask(context: TaskContext): MapStatus = {
+
+    // FIXME 对task要处理的rdd相关的数据，做一些反序列化操作
+    // FIXME rdd的数据 在 taskBinary: Broadcast[Array[Byte]]这个broadcast变量中
     // Deserialize the RDD using the broadcast variable.
     val ser = SparkEnv.get.closureSerializer.newInstance()
     val (rdd, dep) = ser.deserialize[(RDD[_], ShuffleDependency[_, _, _])](
@@ -63,9 +68,19 @@ private[spark] class ShuffleMapTask(
     metrics = Some(context.taskMetrics)
     var writer: ShuffleWriter[Any, Any] = null
     try {
+      // fixme 获取ShuffleManager，从中获取ShuffleWrite
       val manager = SparkEnv.get.shuffleManager
       writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
+
+      // FIXME 最关键代码：首先调用rdd.iterator方法，传入当前task要处理的partition
+      // FIXME 核心逻辑，在rdd的iterator方法中，在这里实现了针对rdd的某个parititon执行用户算子或者函数，查看iterator方法
+      // FIXME 执行完毕后，通过ShuffleWrite经过HashPatitioner进行分区之后，写入自己对应的分区Bucket，
       writer.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
+      // FIXME 最后返回结果MapStatus，里面封装了ShuffleMapTask计算后的数据，存在在哪里，其实就是BlockManager相关的信息
+      // FIXME BlockManager 是spark底层的内存、数据、磁盘数据管理的组建
+
+      // FIXME ShuffleMapTask将输出作为MapStatus发送到DAGScheduler的MapOutputTrackerMaster，
+      // FIXME 每一个MapStatus包含了每一个ResultTask要拉取的数据的位置和大小
       return writer.stop(success = true).get
     } catch {
       case e: Exception =>

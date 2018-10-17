@@ -31,8 +31,7 @@ import org.apache.spark.{Logging, SparkConf}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-/** FIXME
-  * 这是一个接口，它负责为Application与Spark集群进行通信
+/** FIXME 这是一个接口，它负责为Application与Spark集群进行通信
   * 它会接收一个Spark Master 的url，以及一个ApplicationDescription，
   * 和一个集群事件的监听器，以及各种事件发生时的监听器的方法回调
   * Interface allowing applications to speak with a Spark deploy cluster. Takes a master URL,
@@ -88,7 +87,7 @@ private[spark] class AppClient(
     }
 
     def registerWithMaster() {
-      tryRegisterAllMasters()
+      ()
       import context.dispatcher
       var retries = 0
       registrationRetryTimer = Some {

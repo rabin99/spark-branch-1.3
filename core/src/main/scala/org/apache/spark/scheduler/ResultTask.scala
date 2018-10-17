@@ -26,6 +26,7 @@ import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 
 /**
+  * FIXME 将输出返回给驱动程序应用程序的任务。
  * A task that sends back the output to the driver application.
  *
  * See [[Task]] for more information.
@@ -51,13 +52,18 @@ private[spark] class ResultTask[T, U](
     if (locs == null) Nil else locs.toSet.toSeq
   }
 
+  // FIXME 这个一般就是把结果写到Driver、mysql或者hdfs等最终数据落地
   override def runTask(context: TaskContext): U = {
+
+    // fixme 进行基本的反序列化
     // Deserialize the RDD and the func using the broadcast variables.
     val ser = SparkEnv.get.closureSerializer.newInstance()
     val (rdd, func) = ser.deserialize[(RDD[T], (TaskContext, Iterator[T]) => U)](
       ByteBuffer.wrap(taskBinary.value), Thread.currentThread.getContextClassLoader)
 
     metrics = Some(context.taskMetrics)
+
+    // fixme rdd.iterator执行用户定义的算子和函数
     func(context, rdd.iterator(partition, context))
   }
 

@@ -19,6 +19,9 @@ package org.apache.spark.scheduler
 
 import org.apache.spark.annotation.DeveloperApi
 
+/**
+  * FIXME 本地化级别是个枚举，具体对应的值是int类型，从0开始0，1，2，3，4
+  */
 @DeveloperApi
 object TaskLocality extends Enumeration {
   // Process local is expected to be used ONLY within TaskSetManager for now.

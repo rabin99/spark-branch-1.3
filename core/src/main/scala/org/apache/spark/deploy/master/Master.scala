@@ -208,6 +208,8 @@ private[spark] class Master(
     // fixme 那么将RecoveryState状态为ALIVE，否则为RECOVERING
     case ElectedLeader => {
       val (storedApps, storedDrivers, storedWorkers) = persistenceEngine.readPersistedData()
+
+      // FIXME 持久化引擎读取app、driver、worker持久化数据，任何一个为空，即为非ALIVE状态
       state = if (storedApps.isEmpty && storedDrivers.isEmpty && storedWorkers.isEmpty) {
         RecoveryState.ALIVE
       } else {
@@ -242,6 +244,8 @@ private[spark] class Master(
         if (registerWorker(worker)) {
           persistenceEngine.addWorker(worker)
           sender ! RegisteredWorker(masterUrl, masterWebUiUrl)
+
+          // fixme 调度方法，该方法很关键用于Driver，以及App的调度
           schedule()
         } else {
           val workerAddress = worker.actor.path.address
@@ -547,7 +551,7 @@ private[spark] class Master(
         logWarning(s"Re-launching ${d.id}")
         relaunchDriver(d)
       } else {
-        // FIXME 移除Driver
+        // fixme 移除Driver
         removeDriver(d.id, DriverState.ERROR, None)
         logWarning(s"Did not re-launch ${d.id} because it was not supervised")
       }
@@ -572,8 +576,8 @@ private[spark] class Master(
   }
 
   /**
-    * FIXME Master中最频繁的方法，主备切换恢复，最终调用该方法进行从新执行 ，
-    * 注册Application、Driver状态改变，Executor状态改变都是重新调用schedule()
+    * FIXME Master资源调度算法，Master中最频繁的方法，主备切换恢复，最终调用该方法进行从新执行 ，
+    * FIXME 注册Application、Driver状态改变，Executor状态改变都是重新调用schedule()
     * Schedule the currently available resources among waiting apps. This method will be called
     * every time a new app joins or resource availability changes.
     */
@@ -585,26 +589,25 @@ private[spark] class Master(
 
     // First schedule drivers, they take strict precedence over applications
     // Randomization helps balance drivers
-    // Random.shuffle对传入的集合元素进行随机的打乱
-    // 取出worker中的所有注册上来的worker，进行过滤，只对ALIVE的worker进行随机打乱
+    // fixme 取出worker中的所有注册上来的worker，进行过滤，只对ALIVE的worker进行随机打乱
     val shuffledAliveWorkers = Random.shuffle(workers.toSeq.filter(_.state == WorkerState.ALIVE))
     val numWorkersAlive = shuffledAliveWorkers.size
-    // 定义一个当前的指针，用来获取随机后的shuffledAliveWorkers
+    // fixme 定义一个当前的指针，用来获取随机后的shuffledAliveWorkers
     var curPos = 0
 
-    // 首先调度Driver，在yarn-cluser以及standaline-cluster模式下会调度
-    // Driver的调度机制，遍历waitingDrivers ArrayBuffer
+    // FIXME 首先调度Driver，在yarn-cluser以及standaline-cluster模式下会调度
+    // FIXME Driver的调度机制，遍历waitingDrivers ArrayBuffer
     for (driver <- waitingDrivers.toList) { // iterate over a copy of waitingDrivers
       // We assign workers to each waiting driver in a round-robin fashion. For each driver, we
       // start from the last worker that was assigned a driver, and continue onwards until we have
       // explored all alive workers.
       var launched = false
       var numWorkersVisited = 0
-      // 只要还有活着的worker没有遍历到，那么就继续进行遍历。当前这个Driver还没有被启动也就是launched为false
+      // fixme 对可用worker遍历，如果遍历到的worker资源满足driver需要，那么就启动，启动后，循环停止
       while (numWorkersVisited < numWorkersAlive && !launched) {
         val worker = shuffledAliveWorkers(curPos)
         numWorkersVisited += 1
-        // 如果当前这个worker的空闲内存大于等于Driver需要的内存，并且Worker的空闲cput大于等于Driver需要
+        // FIXME 如果当前这个worker的空闲内存大于等于Driver需要的内存，并且Worker的空闲cput大于等于Driver需要
         if (worker.memoryFree >= driver.desc.mem && worker.coresFree >= driver.desc.cores) {
           // 启动Driver
           launchDriver(worker, driver)
@@ -938,6 +941,7 @@ private[spark] class Master(
     new DriverInfo(now, newDriverId(date), desc, date)
   }
 
+  // FIXME 启动Driver
   def launchDriver(worker: WorkerInfo, driver: DriverInfo) {
     logInfo("Launching driver " + driver.id + " on worker " + worker.id)
     // 将Driver加入worker内存的缓存结构，将worker内已经被使用的内存和cpu数量，都加上Driver需要的内存和cpu
@@ -949,6 +953,7 @@ private[spark] class Master(
     driver.state = DriverState.RUNNING
   }
 
+  // FIXME 删除Driver
   def removeDriver(driverId: String, finalState: DriverState, exception: Option[Exception]) {
     // 找到driverid对应的driver，find返回的是一个Option对象
     drivers.find(d => d.id == driverId) match {
