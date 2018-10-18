@@ -128,6 +128,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
   }
 
   /**
+    * FIXME 调用executors获取服务节点url以及ShuffleMapTask输出的文件大小
    * Called from executors to get the server URIs and output sizes of the map outputs of
    * a given shuffle.
    */
@@ -136,8 +137,11 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
     if (statuses == null) {
       logInfo("Don't have map outputs for shuffle " + shuffleId + ", fetching them")
       var fetchedStatuses: Array[MapStatus] = null
+
+      // FIXME 线程同步
       fetching.synchronized {
         // Someone else is fetching it; wait for them to be done
+        // FIXME 不断拉取shuffleId对应的数据，只要还没拉到，死循环，等待
         while (fetching.contains(shuffleId)) {
           try {
             fetching.wait()

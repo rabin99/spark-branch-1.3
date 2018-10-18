@@ -101,7 +101,7 @@ class FileShuffleBlockManager(conf: SparkConf)
   private val metadataCleaner =
     new MetadataCleaner(MetadataCleanerType.SHUFFLE_BLOCK_MANAGER, this.cleanup, conf)
 
-  /** FIXME 给每个map task获取一个ShuffleWriterGroup
+  /** FIXME 给每个map task获取一个ShuffleWriterGroup，获取到一组写对象用于写数据到对应的bucket缓存区中
    * Get a ShuffleWriterGroup for the given map task, which will register it as complete
    * when the writers are closed successfully
    */
@@ -135,11 +135,13 @@ class FileShuffleBlockManager(conf: SparkConf)
 
         // FIXME 如果没有开启consolidation机制，就是普通的shuffle操作
         Array.tabulate[BlockObjectWriter](numBuckets) { bucketId =>
-          // 同样生成
+          // FIXME 同样生成一个ShuffleBlockId
           val blockId = ShuffleBlockId(shuffleId, mapId, bucketId)
+          // FIXME 然后调用BlockManager的diskBlockManager获取一个代表了要写入的本地磁盘文件blockFile
           val blockFile = blockManager.diskBlockManager.getFile(blockId)
           // Because of previous failures, the shuffle file may already exist on this machine.
           // If so, remove it.
+          // fixme 而且会判断，这个blockFile已经存在，则删除
           if (blockFile.exists) {
             if (blockFile.delete()) {
               logInfo(s"Removed existing shuffle file $blockFile")
@@ -147,6 +149,8 @@ class FileShuffleBlockManager(conf: SparkConf)
               logWarning(s"Failed to remove existing shuffle file $blockFile")
             }
           }
+          // FIXME 然后调用blockManager的getDiskWriter方法，针对那个blockFile生成writer
+          // FIXME 所以使用这种普通的shuffle操作的话，对于每一个ShuffleMapTask输出的bucket，那么都会在本地获取一个单独的shuffleBlockFile
           blockManager.getDiskWriter(blockId, blockFile, serializer, bufferSize, writeMetrics)
         }
       }

@@ -86,7 +86,10 @@ class ShuffledRDD[K, V, C](
     Array.tabulate[Partition](part.numPartitions)(i => new ShuffledRDDPartition(i))
   }
 
+  // FIXME shuffle读的入口
   override def compute(split: Partition, context: TaskContext): Iterator[(K, C)] = {
+    // FIXME ResultTask或者ShuffleMapTask在执行到shuffleRDD时，调用compute方法，计算当前这个RDD的partition数据，具体在Task运行，结合TaskRunner内部查看
+    // FIXME 这里调用ShuffleManager的getReader方法，获取一个HashShuffleReader，然后调用它的read方法，拉去该ResultTask/ShuffleMapTask需要聚合的数据
     val dep = dependencies.head.asInstanceOf[ShuffleDependency[K, V, C]]
     SparkEnv.get.shuffleManager.getReader(dep.shuffleHandle, split.index, split.index + 1, context)
       .read()

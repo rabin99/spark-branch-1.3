@@ -30,7 +30,10 @@ import org.apache.spark.network.buffer.ManagedBuffer
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.util.{CompletionIterator, Utils}
 
-/**
+/* FIXME 入口方法initialize(),该类：获取多个块的迭代器。对于本地块，它从本地块管理器获取数据。对于远程块，
+ * FIXME 它使用提供的BlockTransferService获取它们。
+ * FIXME 这将创建一个(BlockID, values)元组的迭代器，以便调用者可以在接收到块时以流水线方式处理它们。
+ * FIXME 实现将远程获取压缩到不超过maxBytesInFlight以避免使用太多内存。(shuffle read task的buffer缓存大小，决定每次能拉多少数据)
  * An iterator that fetches multiple blocks. For local blocks, it fetches from the local block
  * manager. For remote blocks, it fetches them using the provided BlockTransferService.
  *
@@ -136,9 +139,11 @@ final class ShuffleBlockFetcherIterator(
     }
   }
 
+  //  FIXME 具体拉取数据代码！
   private[this] def sendRequest(req: FetchRequest) {
     logDebug("Sending request for %d blocks (%s) from %s".format(
       req.blocks.size, Utils.bytesToString(req.size), req.address.hostPort))
+    // fixme 将所有block大小全部累加
     bytesInFlight += req.size
 
     // so we can look up the size of each blockID
@@ -146,7 +151,10 @@ final class ShuffleBlockFetcherIterator(
     val blockIds = req.blocks.map(_._1.toString)
 
     val address = req.address
+    // FIXME 批量下载远端的block
     shuffleClient.fetchBlocks(address.host, address.port, address.executorId, blockIds.toArray,
+
+      // FIXME 下载远端block成功后，回调BlockFetchingListener.onBlockFetchSuccess()结果，将结果封装为SuccessFetchResult放入Result中
       new BlockFetchingListener {
         override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
           // Only add the buffer to results queue if the iterator is not zombie,
@@ -247,18 +255,27 @@ final class ShuffleBlockFetcherIterator(
     }
   }
 
+  /*
+  FIXME 入口方法，开始拉取ResultTask对应的多份数据
+   */
   private[this] def initialize(): Unit = {
     // Add a task completion callback (called in both success case and failure case) to cleanup.
     context.addTaskCompletionListener(_ => cleanup())
 
     // Split local and remote blocks.
+    // FIXME 切分本地和远程的block
     val remoteRequests = splitLocalRemoteBlocks()
     // Add the remote requests into our queue in a random order
+    // FIXME 切分block之后，进行随机排序操作
     fetchRequests ++= Utils.randomize(remoteRequests)
 
     // Send out initial requests for blocks, up to our maxBytesInFlight
+    // FIXME 循环，发现还有数据没有拉取完，就发送请求到远程去拉取数据
+    // FIXME 这里maxBytesInFlight参数，限制最多能拉取多少数据到本地，然后开始进行自定义的reduce算子处理
     while (fetchRequests.nonEmpty &&
       (bytesInFlight == 0 || bytesInFlight + fetchRequests.front.size <= maxBytesInFlight)) {
+
+      // FIXME 具体去远程获取数据函数，比较复杂
       sendRequest(fetchRequests.dequeue())
     }
 
@@ -266,6 +283,7 @@ final class ShuffleBlockFetcherIterator(
     logInfo("Started " + numFetches + " remote fetches in" + Utils.getUsedTimeMs(startTime))
 
     // Get Local Blocks
+    // FIXME 拉取完远程数据之后，获取本地的数据（数据本地化）
     fetchLocalBlocks()
     logDebug("Got local blocks in " + Utils.getUsedTimeMs(startTime))
   }

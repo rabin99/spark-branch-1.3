@@ -37,6 +37,9 @@ private[spark] class HashShuffleReader[K, C](
   /** Read the combined key-values for this reduce task */
   override def read(): Iterator[Product2[K, C]] = {
     val ser = Serializer.getSerializer(dep.serializer)
+
+    // FIXME ResultTask拉取数据时，其实会用BlockStoreShuffleFetcher来从DAGScheduler的MapOutTrackerMaster中
+    // FIXME 获取自己想要的数据信息，然后底层，再通过blockManager从对应的位置，拉取需要的数据
     val iter = BlockStoreShuffleFetcher.fetch(handle.shuffleId, startPartition, context, ser)
 
     val aggregatedIter: Iterator[Product2[K, C]] = if (dep.aggregator.isDefined) {

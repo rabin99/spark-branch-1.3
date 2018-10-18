@@ -50,7 +50,7 @@ abstract class NarrowDependency[T](_rdd: RDD[T]) extends Dependency[T] {
 }
 
 
-/**
+/* FIXME 表示对shuffle阶段输出的依赖关系。注意，在shuffle的情况下，RDD是transient,因为我们不需要它在executor一端
  * :: DeveloperApi ::
  * Represents a dependency on the output of a shuffle stage. Note that in the case of shuffle,
  * the RDD is transient since we don't need it on the executor side.
