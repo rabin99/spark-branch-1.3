@@ -48,9 +48,13 @@ private[spark] class SortShuffleWriter[K, V, C](
   context.taskMetrics.shuffleWriteMetrics = Some(writeMetrics)
 
   /** Write a bunch of records to this task's output */
+  // FIXME sort shuffle write 写数据机制，每个shuffleMapTask将输出一个文件，并对应生成索引文件
   override def write(records: Iterator[_ <: Product2[K, V]]): Unit = {
+    //  FIXME 如果map端需要合并
     if (dep.mapSideCombine) {
       require(dep.aggregator.isDefined, "Map-side combine without Aggregator specified!")
+
+      // FIXME 使用外部排序器
       sorter = new ExternalSorter[K, V, C](
         dep.aggregator, Some(dep.partitioner), dep.keyOrdering, dep.serializer)
       sorter.insertAll(records)
@@ -69,6 +73,8 @@ private[spark] class SortShuffleWriter[K, V, C](
     val outputFile = shuffleBlockManager.getDataFile(dep.shuffleId, mapId)
     val blockId = shuffleBlockManager.consolidateId(dep.shuffleId, mapId)
     val partitionLengths = sorter.writePartitionedFile(blockId, context, outputFile)
+
+    // FIXME indexFile记录文件输出的位置，索引的文件名：格式 "shuffle_" + shuffleId + "_" + mapId + "_" + reduceId + ".index"
     shuffleBlockManager.writeIndexFile(dep.shuffleId, mapId, partitionLengths)
 
     mapStatus = MapStatus(blockManager.shuffleServerId, partitionLengths)
