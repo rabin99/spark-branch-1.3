@@ -187,10 +187,12 @@ private[spark] class ExternalSorter[K, V, C](
     elementsPerPartition: Array[Long])
   private val spills = new ArrayBuffer[SpilledFile]
 
+    // FIXME sorted的三种方式：一种是SortShuffleWriter、一种是BypassMergerSortShuffleWriter，还有一种UnsafeSortShuffleWriter
   def insertAll(records: Iterator[_ <: Product2[K, V]]): Unit = {
     // TODO: stop combining if we find that the reduction factor isn't high
     val shouldCombine = aggregator.isDefined
 
+    // fixme 如果需要聚合
     if (shouldCombine) {
       // Combine values in-memory first using our AppendOnlyMap
       val mergeValue = aggregator.get.mergeValue
@@ -206,6 +208,7 @@ private[spark] class ExternalSorter[K, V, C](
         maybeSpillCollection(usingMap = true)
       }
     } else if (bypassMergeSort) {
+      // FIXME 如果map端不需要聚合，不需要排序，并且partition个数少于200的默认值：spark.shuffle.sort.bypassMergeThreshold
       // SPARK-4479: Also bypass buffering if merge sort is bypassed to avoid defensive copies
       if (records.hasNext) {
         spillToPartitionFiles(records.map { kv =>
