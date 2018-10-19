@@ -100,7 +100,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       returnValues: Boolean): PutResult = {
     if (level.deserialized) {
       val sizeEstimate = SizeEstimator.estimate(values.asInstanceOf[AnyRef])
-      // FIXME tryToPut放入数据
+      // FIXME 调用tryToPut放入数据
       val putAttempt = tryToPut(blockId, values, sizeEstimate, deserialized = true)
       PutResult(sizeEstimate, Left(values.iterator), putAttempt.droppedBlocks)
     } else {
@@ -342,10 +342,11 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     accountingLock.synchronized {
       // FIXME 调用ensureFreeSpace方法，判断内存是否够用，如果不够，此时会将部分数据用dropFromMemory方法尝试写入磁盘。但是如果持久化级别不支持磁盘，那么数据丢失
       val freeSpaceResult = ensureFreeSpace(blockId, size)
+
       val enoughFreeSpace = freeSpaceResult.success
       droppedBlocks ++= freeSpaceResult.droppedBlocks
 
-      // FIXME 将数据写入内存时候，首先调用enoughFreeSpace，判断内存是否足够放入
+      // FIXME 将数据写入内存时候，首先判断enoughFreeSpace内存是否足够放入
       if (enoughFreeSpace) {
         // FIXME 给数据创建一份memoryEntry
         val entry = new MemoryEntry(value, size, deserialized)
@@ -399,6 +400,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     // Take into account the amount of memory currently occupied by unrolling blocks
     val actualFreeMemory = freeMemory - currentUnrollMemory
 
+    // FIXME 如果当前内存不够将这个block放入
     if (actualFreeMemory < space) {
       val rddToAdd = getRddId(blockIdToAdd)
       val selectedBlocks = new ArrayBuffer[BlockId]
@@ -407,8 +409,10 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       // This is synchronized to ensure that the set of entries is not changed
       // (because of getValue or getBytes) while traversing the iterator, as that
       // can lead to exceptions.
+      // FIXME 不同entries
       entries.synchronized {
         val iterator = entries.entrySet().iterator()
+        // FIXME 尝试从entries中移除一部分数据
         while (actualFreeMemory + selectedMemory < space && iterator.hasNext) {
           val pair = iterator.next()
           val blockId = pair.getKey
@@ -419,8 +423,10 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
         }
       }
 
+      // FIXME 判断，如果移除一部分数据后，就可以存放新的block
       if (actualFreeMemory + selectedMemory >= space) {
         logInfo(s"${selectedBlocks.size} blocks selected for dropping")
+        // FIXME 将之前选择的要移除的block数据遍历
         for (blockId <- selectedBlocks) {
           val entry = entries.synchronized { entries.get(blockId) }
           // This should never be null as only one thread should be dropping
@@ -432,6 +438,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
             } else {
               Right(entry.value.asInstanceOf[ByteBuffer].duplicate())
             }
+            // FIXME 调用dropFromMemory方法，尝试将数据写入磁盘，但是如果block的持久化级别没有说可以写入磁盘，那么数据就彻底丢了
             val droppedBlockStatus = blockManager.dropFromMemory(blockId, data)
             droppedBlockStatus.foreach { status => droppedBlocks += ((blockId, status)) }
           }

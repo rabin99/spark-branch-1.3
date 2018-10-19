@@ -783,6 +783,7 @@ private[spark] class BlockManager(
       try {
         // returnValues - Whether to return the values put
         // blockStore - The type of storage to put these values into
+
         // FIXME 首先根据持久化级别，选择一种BlockStore，MemoryStore,DiskStore等
         val (returnValues, blockStore: BlockStore) = {
           if (putLevel.useMemory) {
@@ -854,6 +855,8 @@ private[spark] class BlockManager(
 
     // Either we're storing bytes and we asynchronously started replication, or we're storing
     // values and need to serialize and replicate them now:
+    // FIXME 重要！
+    // FIXME 如果持久化定义了_2这种后缀，说明需要对block进行replica，然后输到其他节点上
     if (putLevel.replication > 1) {
       data match {
         case ByteBufferValues(bytes) =>
@@ -870,6 +873,7 @@ private[spark] class BlockManager(
             }
             bytesAfterPut = dataSerialize(blockId, valuesAfterPut)
           }
+          // FIXME 调用replicate进行复制操作
           replicate(blockId, bytesAfterPut, putLevel)
           logDebug("Put block %s remotely took %s"
             .format(blockId, Utils.getUsedTimeMs(remoteStartTime)))
@@ -931,6 +935,7 @@ private[spark] class BlockManager(
     // So assuming the list of peers does not change and no replication failures,
     // if there are multiple attempts in the same node to replicate the same block,
     // the same set of peers will be selected.
+    // FIXME 随机获取一个其他的BlockManager
     def getRandomPeer(): Option[BlockManagerId] = {
       // If replication had failed, then force update the cached list of peers and remove the peers
       // that have been already used
@@ -957,7 +962,7 @@ private[spark] class BlockManager(
     // (i) specified number of peers have been replicated to
     // (ii) too many failures in replicating to peers
     // (iii) no peer left to replicate to
-    //
+    // FIXME 三种复制结束条件：(i)已复制指定数量的对等点(ii)向对等点复制失败太多(iii)没有同伴可供复制
     while (!done) {
       getRandomPeer() match {
         case Some(peer) =>
@@ -965,6 +970,8 @@ private[spark] class BlockManager(
             val onePeerStartTime = System.currentTimeMillis
             data.rewind()
             logTrace(s"Trying to replicate $blockId of ${data.limit()} bytes to $peer")
+
+            // FIXME 使用BlockTransferService将数据异步写入到其他BlockManager
             blockTransferService.uploadBlockSync(
               peer.host, peer.port, peer.executorId, blockId, new NioManagedBuffer(data), tLevel)
             logTrace(s"Replicated $blockId of ${data.limit()} bytes to $peer in %s ms"
@@ -981,6 +988,7 @@ private[spark] class BlockManager(
               failures += 1
               replicationFailed = true
               peersFailedToReplicateTo += peer
+              // FIXME spark.storage.maxReplicationFailures配置复制失败次数
               if (failures > maxReplicationFailures) { // too many failures in replcating to peers
                 done = true
               }
