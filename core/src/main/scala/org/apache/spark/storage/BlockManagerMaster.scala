@@ -208,12 +208,14 @@ class BlockManagerMaster(
 
   /** Send a one-way message to the master actor, to which we expect it to reply with true. */
   private def tell(message: Any) {
+
+    // FIXME 向MasterActor发送单向消息，我们希望它以true回复
     if (!askDriverWithReply[Boolean](message)) {
       throw new SparkException("BlockManagerMasterActor returned false, expected true.")
     }
   }
 
-  /**
+  /* FIXME 向Driver Actor发送一条消息，并在默认超时内获得其结果，如果失败，则抛出SparkException。
    * Send a message to the driver actor and get its result within a default timeout, or
    * throw a SparkException if this fails.
    */

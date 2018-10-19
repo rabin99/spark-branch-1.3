@@ -36,6 +36,8 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
   extends BlockStore(blockManager) {
 
   private val conf = blockManager.conf
+
+  // FIXME MemoryStore中维护entries map，其实就真的是存放的每个block的数据，每个block在内存中的数据，用MemoryEntry代表
   private val entries = new LinkedHashMap[BlockId, MemoryEntry](32, 0.75f, true)
 
   @volatile private var currentMemory = 0L
@@ -83,6 +85,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     bytes.rewind()
     if (level.deserialized) {
       val values = blockManager.dataDeserialize(blockId, bytes)
+      // fixme 写入数据
       putIterator(blockId, values, level, returnValues = true)
     } else {
       val putAttempt = tryToPut(blockId, bytes, bytes.limit, deserialized = false)
@@ -97,6 +100,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       returnValues: Boolean): PutResult = {
     if (level.deserialized) {
       val sizeEstimate = SizeEstimator.estimate(values.asInstanceOf[AnyRef])
+      // FIXME tryToPut放入数据
       val putAttempt = tryToPut(blockId, values, sizeEstimate, deserialized = true)
       PutResult(sizeEstimate, Left(values.iterator), putAttempt.droppedBlocks)
     } else {
@@ -152,19 +156,26 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     }
   }
 
+  // FIXME 获取二进制数据，返回Option[ByteBuffer]
   override def getBytes(blockId: BlockId): Option[ByteBuffer] = {
+
+    // FIXME entries也是多线程并发访问：
     val entry = entries.synchronized {
+      // fixme 尝试从内存中获取block的数据
       entries.get(blockId)
     }
     if (entry == null) {
       None
     } else if (entry.deserialized) {
+      // FIXME 如果获取到了非序列化的数据，调用BlockManager数据序列化方法，将数据序列化后返回
       Some(blockManager.dataSerialize(blockId, entry.value.asInstanceOf[Array[Any]].iterator))
     } else {
+      // FIXME 否则，直接返回数据
       Some(entry.value.asInstanceOf[ByteBuffer].duplicate()) // Doesn't actually copy the data
     }
   }
 
+  // FIXME 返回Option[Iterator[Any]]
   override def getValues(blockId: BlockId): Option[Iterator[Any]] = {
     val entry = entries.synchronized {
       entries.get(blockId)
@@ -300,7 +311,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     blockId.asRDDId.map(_.rddId)
   }
 
-  /**
+  /* FIXME 优先放入内存，不行的话，尝试移除部分旧数据，再将block存入
    * Try to put in a set of values, if we can free up enough space. The value should either be
    * an Array if deserialized is true or a ByteBuffer otherwise. Its (possibly estimated) size
    * must also be passed by the caller.
@@ -327,14 +338,19 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     var putSuccess = false
     val droppedBlocks = new ArrayBuffer[(BlockId, BlockStatus)]
 
+    // FIXME 这里多线程，判断内存是否足够放入数据
     accountingLock.synchronized {
+      // FIXME 调用ensureFreeSpace方法，判断内存是否够用，如果不够，此时会将部分数据用dropFromMemory方法尝试写入磁盘。但是如果持久化级别不支持磁盘，那么数据丢失
       val freeSpaceResult = ensureFreeSpace(blockId, size)
       val enoughFreeSpace = freeSpaceResult.success
       droppedBlocks ++= freeSpaceResult.droppedBlocks
 
+      // FIXME 将数据写入内存时候，首先调用enoughFreeSpace，判断内存是否足够放入
       if (enoughFreeSpace) {
+        // FIXME 给数据创建一份memoryEntry
         val entry = new MemoryEntry(value, size, deserialized)
         entries.synchronized {
+          // FIXME 将数据放入内存的entries
           entries.put(blockId, entry)
           currentMemory += size
         }

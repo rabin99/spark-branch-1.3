@@ -370,14 +370,14 @@ private[spark] class Worker(
             akkaUrl,
             conf,
             appLocalDirs, ExecutorState.LOADING)
-          // 把executorRunner加入本地缓存
+          // FIXME 把executorRunner加入本地缓存
           executors(appId + "/" + execId) = manager
-          // 启动ExecutorRunner
+          // FIXME 启动ExecutorRunner
           manager.start()
-          // 加上executor需要的资源
+          // FIXME 加上executor需要的资源
           coresUsed += cores_
           memoryUsed += memory_
-          // 向master发送消息
+          // FIXME 向master发送消息
           master ! ExecutorStateChanged(appId, execId, manager.state, None, None)
         } catch {
           case e: Exception => {

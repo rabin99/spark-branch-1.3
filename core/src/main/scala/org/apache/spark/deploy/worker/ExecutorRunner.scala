@@ -30,7 +30,7 @@ import org.apache.spark.deploy.{ApplicationDescription, ExecutorState}
 import org.apache.spark.deploy.DeployMessages.ExecutorStateChanged
 import org.apache.spark.util.logging.FileAppender
 
-/**
+/*
   * FIXME 管理executor，当前只在standalone使用
  * Manages the execution of one executor process.
  * This is currently only used in standalone mode.

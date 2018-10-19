@@ -56,7 +56,7 @@ private[spark] class BlockResult(
   inputMetrics.incBytesRead(bytes)
 }
 
-/**
+/* FIXME BlockManager运行在每个节点上，包括Driver和executor都会有一份，主要提供了在本地或远程存取数据的功能，支持内存、磁盘、堆外空空间
  * Manager running on every node (driver and executors) which provides interfaces for putting and
  * retrieving blocks both locally and remotely into various stores (memory, disk, and off-heap).
  *
@@ -78,6 +78,7 @@ private[spark] class BlockManager(
 
   val diskBlockManager = new DiskBlockManager(this, conf)
 
+  // FIXME 每个BlockManager自己会维护一个Map，维护BlockInfo，可以用于代表一个Block，BlockInfo最大作用，用于作为多线程并发访问一个Block的同步监视器
   private val blockInfo = new TimeStampedHashMap[BlockId, BlockInfo]
 
   // Actual storage of where blocks are kept
@@ -190,9 +191,14 @@ private[spark] class BlockManager(
    * service if configured.
    */
   def initialize(appId: String): Unit = {
+
+    // FIXME 初始化用于远程block数据传输的BlockTransferService
     blockTransferService.init(this)
     shuffleClient.init(appId)
 
+    // FIXME 为当前这个BlockManager创建一个唯一的BlockManagerId
+    // fixme 参数：executorId（每个BlockManager都挂念一个executor,BlockTransferService的hostname、以及blockTransferService的port）
+    // fixme 从初始化看出一个BlockManager是通过一个节点上的Executor来唯一标识的
     blockManagerId = BlockManagerId(
       executorId, blockTransferService.hostName, blockTransferService.port)
 
@@ -423,7 +429,7 @@ private[spark] class BlockManager(
     locations
   }
 
-  /**
+  /* FIXME 获取本地block manager
    * Get block from local block manager.
    */
   def getLocal(blockId: BlockId): Option[BlockResult] = {
@@ -453,8 +459,12 @@ private[spark] class BlockManager(
   }
 
   private def doGetLocal(blockId: BlockId, asBlockResult: Boolean): Option[Any] = {
+
+    // FIXME 首先尝试获取block对应的BlockInfo的锁
     val info = blockInfo.get(blockId).orNull
     if (info != null) {
+
+      // FIXME 对所有BlockInfo都会进行多线程并发访问的同步操作，所以BlockInfo相当于是一个Block用作多线程并发访问的同步监视器
       info.synchronized {
         // Double check to make sure the block is still there. There is a small chance that the
         // block has been removed by removeBlock (which also synchronizes on the blockInfo object).
@@ -467,6 +477,7 @@ private[spark] class BlockManager(
         }
 
         // If another thread is writing the block, wait for it to become ready.
+        //  FIXME 如果其他线程在操作这个block，那么会卡住等待，排他锁，如果始终没有获取到，返回false
         if (!info.waitForReady()) {
           // If we get here, the block write failed.
           logWarning(s"Block $blockId was marked as failure.")
@@ -477,6 +488,7 @@ private[spark] class BlockManager(
         logDebug(s"Level for block $blockId is $level")
 
         // Look for the block in memory
+        // FIXME 如果持久化级别是内存，尝试从MemoryStore中读取
         if (level.useMemory) {
           logDebug(s"Getting block $blockId from memory")
           val result = if (asBlockResult) {
@@ -510,9 +522,11 @@ private[spark] class BlockManager(
           }
         }
 
+        // FIXME 如果是磁盘保存
         // Look for block on disk, potentially storing it back in memory if required
         if (level.useDisk) {
           logDebug(s"Getting block $blockId from disk")
+          // fixme 底层使用java nio进行文件的读写
           val bytes: ByteBuffer = diskStore.getBytes(blockId) match {
             case Some(b) => b
             case None =>
@@ -535,6 +549,7 @@ private[spark] class BlockManager(
               /* We'll store the bytes in memory if the block's storage level includes
                * "memory serialized", or if it should be cached as objects in memory
                * but we only requested its serialized bytes. */
+              // FIXME 如果使用了Disk也使用了Memory级别，那么从disk读取出来以后，会尝试放入MemoryStore中，也就是缓存到内存中
               val copyForMemory = ByteBuffer.allocate(bytes.limit)
               copyForMemory.put(bytes)
               memoryStore.putBytes(blockId, copyForMemory, level)
@@ -588,9 +603,13 @@ private[spark] class BlockManager(
 
   private def doGetRemote(blockId: BlockId, asBlockResult: Boolean): Option[Any] = {
     require(blockId != null, "BlockId is null")
+
+    // fixme 首先BlockManagerMaster上，获取每个blockId对应的BlockManager信息，然后随机打乱
     val locations = Random.shuffle(master.getLocations(blockId))
+    // fixme 遍历每个BlockManage
     for (loc <- locations) {
       logDebug(s"Getting remote block $blockId from $loc")
+      // FIXME 使用BlockTransferService进行一步的远程网络获取，将block数据传输回来，连接使用host、port、executorId
       val data = blockTransferService.fetchBlockSync(
         loc.host, loc.port, loc.executorId, blockId.toString).nioByteBuffer()
 
@@ -682,7 +701,7 @@ private[spark] class BlockManager(
     doPut(blockId, ByteBufferValues(bytes), level, tellMaster, effectiveStorageLevel)
   }
 
-  /**
+  /* FIXME 核心实现相当于可以读数据，读本地、远程；也可以写数据，写内存、磁盘。
    * Put the given block according to the given level in one of the block stores, replicating
    * the values if necessary.
    *
@@ -710,6 +729,7 @@ private[spark] class BlockManager(
     /* Remember the block's storage level so that we can correctly drop it to disk if it needs
      * to be dropped right after it got put into memory. Note, however, that other threads will
      * not be able to get() this block until we call markReady on its BlockInfo. */
+    // FIXME 为要写入的Block，创建一个BlockInfo，并将其放入blockInfo Map中
     val putBlockInfo = {
       val tinfo = new BlockInfo(level, tellMaster)
       // Do atomically !
@@ -754,6 +774,7 @@ private[spark] class BlockManager(
       case _ => null
     }
 
+    // FIXME 尝试对BlockInfo加锁，进行多线程并发访问同步
     putBlockInfo.synchronized {
       logTrace("Put for block %s took %s to get into synchronized block"
         .format(blockId, Utils.getUsedTimeMs(startTimeMs)))
@@ -762,6 +783,7 @@ private[spark] class BlockManager(
       try {
         // returnValues - Whether to return the values put
         // blockStore - The type of storage to put these values into
+        // FIXME 首先根据持久化级别，选择一种BlockStore，MemoryStore,DiskStore等
         val (returnValues, blockStore: BlockStore) = {
           if (putLevel.useMemory) {
             // Put it in memory first, even if it also has useDisk set to true;
@@ -780,6 +802,7 @@ private[spark] class BlockManager(
           }
         }
 
+        // FIXME 根据选择的store，然后根据数据类型，将数据放入store
         // Actually put the values
         val result = data match {
           case IteratorValues(iterator) =>
@@ -802,6 +825,7 @@ private[spark] class BlockManager(
           result.droppedBlocks.foreach { updatedBlocks += _ }
         }
 
+        // FIXME 获取到一个Block对应的BlockStatus
         val putBlockStatus = getCurrentBlockStatus(blockId, putBlockInfo)
         if (putBlockStatus.storageLevel != StorageLevel.NONE) {
           // Now that the block is in either the memory, tachyon, or disk store,
@@ -809,6 +833,7 @@ private[spark] class BlockManager(
           marked = true
           putBlockInfo.markReady(size)
           if (tellMaster) {
+            // FIXME 调用reportBlockStatus()方法，将新写入的block数据发送到BlockmanagerMasterActor,以便进行block元数据的同步和维护
             reportBlockStatus(blockId, putBlockInfo, putBlockStatus)
           }
           updatedBlocks += ((blockId, putBlockStatus))

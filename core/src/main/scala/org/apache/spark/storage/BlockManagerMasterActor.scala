@@ -33,7 +33,8 @@ import org.apache.spark.scheduler._
 import org.apache.spark.storage.BlockManagerMessages._
 import org.apache.spark.util.{ActorLogReceive, AkkaUtils, Utils}
 
-/**
+/* FIXME BlockManagerMasterActor是主节点上的一个参与者，用于跟踪所有从服务器的块管理器的状态。
+ * FIXME BlockManagerMasterActor负责维护各个executor的BlockManager的元数据BlockManagerInfo、BlockStatus
  * BlockManagerMasterActor is an actor on the master node to track statuses of
  * all slaves' block managers.
  */
@@ -42,9 +43,12 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
   extends Actor with ActorLogReceive with Logging {
 
   // Mapping from block manager id to the block manager's information.
+  // FIXME Block Manager ID到BlockManagerInfo 的映射
+  // FIXME BlockManagerMaster要负责维护每个BlockManager的BlockManagerInfo
   private val blockManagerInfo = new mutable.HashMap[BlockManagerId, BlockManagerInfo]
 
   // Mapping from executor ID to block manager ID.
+  // FIXME executorID 到 Block Manager ID 的映射，executor是与BlockManager相关联
   private val blockManagerIdByExecutor = new mutable.HashMap[String, BlockManagerId]
 
   // Mapping from block id to the set of block managers that have the block.
@@ -167,18 +171,25 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
     )
   }
 
+  // FIXME 删除BlockManager方法
   private def removeBlockManager(blockManagerId: BlockManagerId) {
+    // FIXME 尝试根据blockManagerId获取它对应的BlockManagerInfo
     val info = blockManagerInfo(blockManagerId)
 
     // Remove the block manager from blockManagerIdByExecutor.
+    // fixme 从blockManagerIdByExecutor map中移除executorId对应的BlockManager
     blockManagerIdByExecutor -= blockManagerId.executorId
 
     // Remove it from blockManagerInfo and remove all the blocks.
+    // fixme 从blockManagerInfo map中也相应移除blockManagerInfo
     blockManagerInfo.remove(blockManagerId)
     val iterator = info.blocks.keySet.iterator
+
+    // fixme 遍历BlockManagerInfo内部所有的block块的blockId
     while (iterator.hasNext) {
       val blockId = iterator.next
       val locations = blockLocations.get(blockId)
+      // fixme 清空BlockManagerInfo内部的block的BlockStatus信息
       locations -= blockManagerId
       if (locations.size == 0) {
         blockLocations.remove(blockId)
@@ -190,6 +201,7 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
 
   private def removeExecutor(execId: String) {
     logInfo("Trying to remove executor " + execId + " from BlockManagerMaster.")
+    //  FIXME removeBlockManager获取executorId对应的BlockmanagerInfo,对其调用removeBlockManager()方法
     blockManagerIdByExecutor.get(execId).foreach(removeBlockManager)
   }
 
@@ -291,28 +303,42 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
     ).map(_.flatten.toSeq)
   }
 
+  /*
+  FIXME 注册BlockManager
+   */
   private def register(id: BlockManagerId, maxMemSize: Long, slaveActor: ActorRef) {
     val time = System.currentTimeMillis()
+
+    // FIXME 首先判断，如果本地HashMap中没有指定的BlockManagerId,说明没有注册，那么才会执行注册逻辑
     if (!blockManagerInfo.contains(id)) {
+      // FIXME 根据blockManager对应的executorID找到对应的BlockManagerInfo
+      // FIXME 这里其实是做一个安全判断，因为，如果blockManagerInfo map里没有BlockManagerId，
+      // FIXME 那么同步的blockManagerIdByExecutor map里，也必须没有；如果有，那么需要先清理掉。
       blockManagerIdByExecutor.get(id.executorId) match {
         case Some(oldId) =>
           // A block manager of the same executor already exists, so remove it (assumed dead)
           logError("Got two different block manager registrations on same executor - " 
               + s" will replace old one $oldId with new one $id")
+          // FIXME 移除executorId相关的blockManagerInfo
           removeExecutor(id.executorId)  
         case None =>
       }
       logInfo("Registering block manager %s with %s RAM, %s".format(
         id.hostPort, Utils.bytesToString(maxMemSize), id))
-      
+
+      // scala中HashMap赋值操作后，就直接添加了一个元素进去。
+      // fixme executorId到blockmanagerId
       blockManagerIdByExecutor(id.executorId) = id
-      
+      // fixme 为blockManagerId创建一份BlockManagerInfo
       blockManagerInfo(id) = new BlockManagerInfo(
         id, System.currentTimeMillis(), maxMemSize, slaveActor)
     }
     listenerBus.post(SparkListenerBlockManagerAdded(time, id, maxMemSize))
   }
 
+  /*
+  FIXME 更新blockInfo，每个BlockManager上，如果block发生变化，都要发送updateBlockInfo请求到BlockManagerMaster
+   */
   private def updateBlockInfo(
       blockManagerId: BlockManagerId,
       blockId: BlockId,
@@ -336,9 +362,14 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
       return true
     }
 
+    // FIXME 调用blockManager的BlockManagerInfo的updateBlockInfo()，更新block信息
     blockManagerInfo(blockManagerId).updateBlockInfo(
       blockId, storageLevel, memSize, diskSize, tachyonSize)
 
+    // FIXME 每个block可能会在多个BlockManager上，如果将StorageLevel设置成带_2的这种，
+    // FIXME 那么就需要将block replicate一份到其他BlockManager上
+    // FIXME blockLocations Map 其实就是保存了每个blockId对应的BlockManagerId的set集合
+    // FIXME 所有这里，会更新blockLocation中的信息，因为使用set存储BlockManagerId,因为自动就去重了。
     var locations: mutable.HashSet[BlockManagerId] = null
     if (blockLocations.containsKey(blockId)) {
       locations = blockLocations.get(blockId)
@@ -408,6 +439,7 @@ object BlockStatus {
   def empty: BlockStatus = BlockStatus(StorageLevel.NONE, 0L, 0L, 0L)
 }
 
+// FIXME BlockManagerInfo相当于是BlockManager的元数据
 private[spark] class BlockManagerInfo(
     val blockManagerId: BlockManagerId,
     timeMs: Long,
@@ -419,6 +451,7 @@ private[spark] class BlockManagerInfo(
   private var _remainingMem: Long = maxMem
 
   // Mapping from block id to its status.
+  // FIXME BlockManagerInfo管理着每个BlockManager内部的block的blockId-BlockStatus的映射
   private val _blocks = new JHashMap[BlockId, BlockStatus]
 
   def getStatus(blockId: BlockId) = Option(_blocks.get(blockId))
@@ -432,22 +465,33 @@ private[spark] class BlockManagerInfo(
       storageLevel: StorageLevel,
       memSize: Long,
       diskSize: Long,
-      tachyonSize: Long) {
+      tachyonSize: Long) {  // fixme 早期版本还支持tachyonsize
 
     updateLastSeenMs()
 
+    // FIXME 判断内部有这个block
     if (_blocks.containsKey(blockId)) {
       // The block exists on the slave already.
       val blockStatus: BlockStatus = _blocks.get(blockId)
       val originalLevel: StorageLevel = blockStatus.storageLevel
       val originalMemSize: Long = blockStatus.memSize
 
+      // FIXME 判断如果StorageLevel是使用内存，那么就给剩余内存数量加上当前的内存量
       if (originalLevel.useMemory) {
         _remainingMem += originalMemSize
       }
     }
 
+    // FIXME 给block创建一份BlockStatus，然后根据其持久化级别，对相应的内存资源进行计算
     if (storageLevel.isValid) {
+      /*
+      isValid意味着它要么存储在内存中，要么存储在磁盘上，要么存储Tachyon上。
+      这里的memSize表示在内存中或从内存中删除的数据大小，
+      这里的tachyonSize表示在速子中或从速子中删除的数据大小，
+      这里的diskSize表示在磁盘中或从磁盘中删除的数据大小。
+      当一个块从内存中删除到磁盘时，它们都可以大于0。
+      因此，一个安全的设置BlockStatus的方法是在精确的模式下设置它的信息。
+       */
       /* isValid means it is either stored in-memory, on-disk or on-Tachyon.
        * The memSize here indicates the data size in or dropped from memory,
        * tachyonSize here indicates the data size in or dropped from Tachyon,
@@ -457,24 +501,30 @@ private[spark] class BlockManagerInfo(
       if (storageLevel.useMemory) {
         _blocks.put(blockId, BlockStatus(storageLevel, memSize, 0, 0))
         _remainingMem -= memSize
+
         logInfo("Added %s in memory on %s (size: %s, free: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(memSize),
           Utils.bytesToString(_remainingMem)))
       }
       if (storageLevel.useDisk) {
         _blocks.put(blockId, BlockStatus(storageLevel, 0, diskSize, 0))
+
         logInfo("Added %s on disk on %s (size: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(diskSize)))
       }
       if (storageLevel.useOffHeap) {
         _blocks.put(blockId, BlockStatus(storageLevel, 0, 0, tachyonSize))
+
         logInfo("Added %s on tachyon on %s (size: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(tachyonSize)))
       }
     } else if (_blocks.containsKey(blockId)) {
+
+      // FIXME 如果StorageLevel是非法的，而且之前保存过则BlockId，那么就将blockId从内存中删除
       // If isValid is not true, drop the block.
       val blockStatus: BlockStatus = _blocks.get(blockId)
       _blocks.remove(blockId)
+
       if (blockStatus.storageLevel.useMemory) {
         logInfo("Removed %s on %s in memory (size: %s, free: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(blockStatus.memSize),
