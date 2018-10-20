@@ -208,6 +208,7 @@ private[spark] class BlockManager(
       blockManagerId
     }
 
+    // FIXME 向Driver上的BlockManagerMaster注册blockManager
     master.registerBlockManager(blockManagerId, maxMemory, slaveActor)
 
     // Register Executors' configuration with the local shuffle service, if one should exist.
@@ -629,7 +630,7 @@ private[spark] class BlockManager(
     None
   }
 
-  /**
+  /* FIXME 通过BlockManager获取数据的入口方法，优先从本地获取
    * Get a block from the block manager (either local or remote).
    */
   def get(blockId: BlockId): Option[BlockResult] = {

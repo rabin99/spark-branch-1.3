@@ -240,7 +240,7 @@ abstract class RDD[T: ClassTag](
    * subclasses of RDD.
    */
   final def iterator(split: Partition, context: TaskContext): Iterator[T] = {
-    // FIXME CacheManager
+    // FIXME 不为None，就是说之前持久化过RDD，那么就不要直接去父RDD执行算子，计算新的RDD的Partition了，优先尝试使用CacheManager去获取持久化的数据
     if (storageLevel != StorageLevel.NONE) {
       SparkEnv.get.cacheManager.getOrCompute(this, split, context, storageLevel)
     } else {
@@ -278,7 +278,7 @@ abstract class RDD[T: ClassTag](
    */
   private[spark] def computeOrReadCheckpoint(split: Partition, context: TaskContext): Iterator[T] =
   {
-    // FIXME checkpoint。。。
+    // FIXME checkpoint。。。剖析checkpoint
     if (isCheckpointed) firstParent[T].iterator(split, context) else compute(split, context)
   }
 

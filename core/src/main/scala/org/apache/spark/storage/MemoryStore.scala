@@ -130,6 +130,13 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
    * back from disk and attempts to cache it in memory. In this case, we should not persist the
    * block back on disk again, as it is already in disk store.
    */
+  /*
+  尝试将给定的块放入内存存储区。
+  可能没有足够的空间在内存中完全展开迭代器，在这种情况下，我们可以选择将值拖放到磁盘中
+  (1)块的存储级别指定useDisk，和
+  (2)“allowPersistToDisk”为true。“allowPersistToDisk”为false的一种情况是，块管理器从磁盘读取一个块并试图将其缓存到内存中。
+  在这种情况下，我们不应该再次将块持久化到磁盘上，因为它已经在磁盘存储中了。
+   */
   private[storage] def putIterator(
       blockId: BlockId,
       values: Iterator[Any],
@@ -223,6 +230,13 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
    * This method returns either an array with the contents of the entire block or an iterator
    * containing the values of the block (if the array would have exceeded available memory).
    */
+  /*
+  在内存中安全地展开给定的块。
+  此操作的安全性指的是避免由于一次在内存中展开整个块而导致的潜在OOM异常。
+  通过定期检查展开块的内存限制是否仍然满足，如果不满足，则立即停止。
+  对于没有足够的空闲内存来容纳整个块的情况，此检查是一种保护措施。
+  这个方法返回一个包含整个块内容的数组，或者返回一个包含块值的迭代器(如果数组超出了可用内存)。
+   */
   def unrollSafely(
       blockId: BlockId,
       values: Iterator[Any],
@@ -270,6 +284,8 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
                 // If the first request is not granted, try again after ensuring free space
                 // If there is still not enough space, give up and drop the partition
                 val spaceToEnsure = maxUnrollMemory - currentUnrollMemory
+                // FIXME 反复循环判断，只要还有数据没有写入内存，并且可以继续尝试往内存中写，那么就判断，
+                // FIXME 如果内存大小不够存放数据，就调用ensureFreeSpace，尝试清空一些内存空间
                 if (spaceToEnsure > 0) {
                   val result = ensureFreeSpace(blockId, spaceToEnsure)
                   droppedBlocks ++= result.droppedBlocks
@@ -385,6 +401,10 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
    *
    * Return whether there is enough free space, along with the blocks dropped in the process.
    */
+  /*
+  试图释放给定的空间来存储一个特定的块,但可能会失败如果大于我们的内存块或需要更换另一个块相同的抽样(导致浪费循环置换模式不适合的抽样内存,我们想避免)。
+假设调用方持有“accountingLock”，以确保只有一个线程正在丢弃块。否则，在调用者输入新的值之前，释放的空间可能会被填满。返回是否有足够的空闲空间，以及过程中掉落的块。
+   */
   private def ensureFreeSpace(
       blockIdToAdd: BlockId,
       space: Long): ResultWithDroppedBlocks = {
@@ -440,6 +460,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
             }
             // FIXME 调用dropFromMemory方法，尝试将数据写入磁盘，但是如果block的持久化级别没有说可以写入磁盘，那么数据就彻底丢了
             val droppedBlockStatus = blockManager.dropFromMemory(blockId, data)
+
             droppedBlockStatus.foreach { status => droppedBlocks += ((blockId, status)) }
           }
         }
