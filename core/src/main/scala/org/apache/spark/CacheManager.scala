@@ -23,7 +23,7 @@ import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage._
 
-/**
+/* FIXME Spark类负责将RDDs分区内容传递给块管理器，并确保节点不会同时加载两个RDD副本
  * Spark class responsible for passing RDDs partition contents to the BlockManager and making
  * sure a node doesn't load two copies of an RDD at once.
  */
@@ -33,6 +33,9 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
   private val loading = new mutable.HashSet[RDDBlockId]
 
   /** Gets or computes an RDD partition. Used by RDD.iterator() when an RDD is cached. */
+  /*
+  FIXME 在RDD的iterator方法中，（查看RDD.iterator()）判断如果StorageLevel不为None，那么尝试使用CacheManager获取数据，否则重新计算，具体代码见：RDD.iterator
+   */
   def getOrCompute[T](
       rdd: RDD[T],
       partition: Partition,
@@ -76,6 +79,7 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
           val computedValues = rdd.computeOrReadCheckpoint(partition, context)
 
           // If the task is running locally, do not persist the result
+          // FIXME 如果数据是在Driver的本地计算，那么直接返回，否则，还需要对数据进行持久化操作。
           if (context.isRunningLocally) {
             return computedValues
           }
@@ -104,6 +108,11 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
    *
    * If the lock is free, just acquire it and return None. Otherwise, another thread is already
    * loading the partition, so we wait for it to finish and return the values loaded by the thread.
+   */
+  /*
+  获取由给定RDDBlockId的分区的加载锁。
+  如果锁是免费的，那么只需要获取它，不返回任何锁。
+  否则，另一个线程已经在加载分区，因此我们等待它完成并返回线程加载的值。
    */
   private def acquireLockForPartition[T](id: RDDBlockId): Option[Iterator[T]] = {
     loading.synchronized {
@@ -136,7 +145,7 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
     }
   }
 
-  /**
+  /*
    * Cache the values of a partition, keeping track of any updates in the storage statuses of
    * other blocks along the way.
    *
@@ -144,6 +153,11 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
    * behavior, not the level originally specified by the user. This is mainly for forcing a
    * MEMORY_AND_DISK partition to disk if there is not enough room to unroll the partition,
    * while preserving the the original semantics of the RDD as specified by the application.
+   */
+  /*
+  缓存分区的值，跟踪在此过程中其他块的存储状态中的任何更新。
+  有效存储级别是指实际指定BlockManager put行为的级别，而不是用户最初指定的级别。
+  这主要用于在没有足够空间展开分区的情况下将MEMORY_AND_DISK分区强制转换为磁盘，同时保留应用程序指定的RDD的原始语义。
    */
   private def putInBlockManager[T](
       key: BlockId,

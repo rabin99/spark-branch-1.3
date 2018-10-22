@@ -70,6 +70,7 @@ class CheckpointRDD[T: ClassTag](sc: SparkContext, val checkpointPath: String)
   }
 
   override def compute(split: Partition, context: TaskContext): Iterator[T] = {
+    // FIXME 利用hadoop的api path，创建一个，比如hdfs文件的路径，然后用checkpointRDD的readFromFile方法，读取hdfs文件中的数据
     val file = new Path(checkpointPath, CheckpointRDD.splitIdToFile(split.index))
     CheckpointRDD.readFromFile(file, broadcastedConf, context)
   }

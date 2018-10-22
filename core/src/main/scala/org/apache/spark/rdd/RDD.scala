@@ -239,6 +239,13 @@ abstract class RDD[T: ClassTag](
    * This should ''not'' be called by users directly, but is available for implementors of custom
    * subclasses of RDD.
    */
+  /*
+  FIXME 先persist()再checkpoint()，原理如下：
+  首选执行到该rdd的iterator之后，会发现storageLevel！=StorageLevel.NONE，就会去CacheManager去获取数据，此时发现BlockManager获取不到数据（因为是第一个执行）
+  那么就会第一次还是会计算一次该rdd的数据，然后通过CacheManager的putInBlockManager()将其通过BlockManager进行持久化
+  rdd所在job运行结束后，然后启动单独的job进行checkpoint操作，此时又会执行到该rdd的iterator方法，那么发现持久化不为空，默认从BlockManager直接读取持久化数据
+  如果发现持久化数据丢了，那么又执行else,调用computerOrReadCheckpoint()方法，判断如果rdd是isCheckpoint为true，那么就会用它父rdd的iterator()方法，其实就是从checkpoint外部文件系统读取数据
+   */
   final def iterator(split: Partition, context: TaskContext): Iterator[T] = {
     // FIXME 不为None，就是说之前持久化过RDD，那么就不要直接去父RDD执行算子，计算新的RDD的Partition了，优先尝试使用CacheManager去获取持久化的数据
     if (storageLevel != StorageLevel.NONE) {
@@ -278,7 +285,7 @@ abstract class RDD[T: ClassTag](
    */
   private[spark] def computeOrReadCheckpoint(split: Partition, context: TaskContext): Iterator[T] =
   {
-    // FIXME checkpoint。。。剖析checkpoint
+    // FIXME checkpoint调用父RDD的iterator
     if (isCheckpointed) firstParent[T].iterator(split, context) else compute(split, context)
   }
 
@@ -1340,6 +1347,9 @@ abstract class RDD[T: ClassTag](
    * RDDs will be removed. This function must be called before any job has been
    * executed on this RDD. It is strongly recommended that this RDD is persisted in
    * memory, otherwise saving it on a file will require recomputation.
+   */
+  /*
+  FIXME checkpoint 执行之后会丢失lineage，RDD的父RDD强制为CheckpointRDD，强烈建议先持久化到内存，否则会直接从新计算。
    */
   def checkpoint() {
     if (context.checkpointDir.isEmpty) {

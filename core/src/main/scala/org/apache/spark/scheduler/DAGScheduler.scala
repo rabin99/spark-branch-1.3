@@ -535,7 +535,9 @@ class DAGScheduler(
     assert(partitions.size > 0)
     val func2 = func.asInstanceOf[(TaskContext, Iterator[_]) => _]
     val waiter = new JobWaiter(this, jobId, partitions.size, resultHandler)
-    //
+    // FIXME 提交到JobSubmitted消息到DAGSchedulerEventProcessLoop，
+    // FIXME JobSubmitted消息在DAGSchedulerEventProcessLoop中定义接收消息的case，
+    // FIXME 接收提交job，会调用dagScheduler.hadleJobSubmitted
     eventProcessLoop.post(JobSubmitted(
       jobId, rdd, func2, partitions.toArray, allowLocal, callSite, waiter, properties))
     waiter
