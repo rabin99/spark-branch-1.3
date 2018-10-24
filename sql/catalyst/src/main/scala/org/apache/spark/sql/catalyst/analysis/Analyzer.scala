@@ -37,6 +37,7 @@ object SimpleAnalyzer extends Analyzer(EmptyCatalog, EmptyFunctionRegistry, true
  * [[UnresolvedRelation]]s into fully typed objects using information in a schema [[Catalog]] and
  * a [[FunctionRegistry]].
  */
+// FIXME Analyzer的父类是RuleExecutor，apply方法在父类当中
 class Analyzer(
     catalog: Catalog,
     registry: FunctionRegistry,

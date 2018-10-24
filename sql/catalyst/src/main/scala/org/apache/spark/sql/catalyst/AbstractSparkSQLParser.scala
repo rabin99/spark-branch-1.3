@@ -32,9 +32,14 @@ private[sql] object KeywordNormalizer {
 private[sql] abstract class AbstractSparkSQLParser
   extends StandardTokenParsers with PackratParsers {
 
+
   def apply(input: String): LogicalPlan = {
     // Initialize the Keywords.
     lexical.initialize(reservedWords)
+
+    // FIXME 用lexical.Scanner针对sql语句，来进行语法检查、分析，满足语法检查结果的话就使用sql解析器，针对sql进行解析，
+    // FIXME 包括词法解析（将sql语句解析成一个个短语token）、语法解析最后生成一个Unresolved LogicalPlan（[ʌnrɪ'zɒlvd）
+    // FIXME 该LogicalPlan仅仅针对sql语法本身生成，不涉及任何关联的数据等信息
     phrase(start)(new lexical.Scanner(input)) match {
       case Success(plan, _) => plan
       case failureOrError => sys.error(failureOrError.toString)
@@ -79,6 +84,7 @@ private[sql] abstract class AbstractSparkSQLParser
   }
 }
 
+// FIXME 针对sql语句，执行一个检查，满足检查，才去分析，否则说明sql有问题
 class SqlLexical extends StdLexical {
   case class FloatLit(chars: String) extends Token {
     override def toString: String = chars

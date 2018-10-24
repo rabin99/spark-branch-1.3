@@ -109,6 +109,9 @@ class SQLContext(@transient val sparkContext: SparkContext)
   @transient
   protected[sql] lazy val functionRegistry: FunctionRegistry = new SimpleFunctionRegistry(true)
 
+  // FIXME Analyzer的所在地
+  // FIXME QueryExecution实际执行sql语句的时候，第一步就是用之前SqlParser解析出来的纯逻辑封装的语法树的Unresolved
+  // FIXME LogicalPlan，去调用Analyzer的apply方法，将Unresolved LogicalPlan生成Resolved LogicalPlan
   @transient
   protected[sql] lazy val analyzer: Analyzer =
     new Analyzer(catalog, functionRegistry, caseSensitive = true) {
@@ -128,16 +131,21 @@ class SQLContext(@transient val sparkContext: SparkContext)
   @transient
   protected[sql] val ddlParser = new DDLParser(sqlParser.apply(_))
 
+
+  // FIXME SqlParser，实现上是SparkSQLParser的实例，SparkSQLParser里面封装了catalyst中的SqlParser
   @transient
   protected[sql] val sqlParser = {
     val fallback = new catalyst.SqlParser
+    // FIXME 参数是SqlParser
     new SparkSQLParser(fallback(_))
   }
 
   protected[sql] def parseSql(sql: String): LogicalPlan = {
+    // FIXME SqlParser执行的入口，实际调用SqlParser的apply()方法，来获取一个对sql语句解析后的LogicalPlan
     ddlParser(sql, false).getOrElse(sqlParser(sql))
   }
 
+  // FIXME 执行sql语句，真正针对数据查询并返回结果的时候，会触发executeSql，QueryExecution 实际上就会触发整个后续流程
   protected[sql] def executeSql(sql: String): this.QueryExecution = executePlan(parseSql(sql))
 
   protected[sql] def executePlan(plan: LogicalPlan) = new this.QueryExecution(plan)
@@ -928,8 +936,24 @@ class SQLContext(@transient val sparkContext: SparkContext)
    *
    * @group basic
    */
-  def sql(sqlText: String): DataFrame = {
+  /*
+  FIXME 使用Spark执行一条SQL查询语句，将结果作为DataFrame返回。SQL解析使用的方言，可以通过spark.sql.dialect参数，来进行设置。
+    */
+    def sql(sqlText: String): DataFrame = {
+    // FIXME sql方言必须是sql
     if (conf.dialect == "sql") {
+      // FIXME SQLContext的sql()方法进入执行阶段，具有lazy特性，针对SQLParser组建针对sql语句生成一个Unresolved LogicalPlan
+      // FIXME 再将Unresolved LogincalPlan和SQLContext自身封装为DF返回，其中仅封装了sql语句的Unresolved LogicalPlan
+
+      // FIXME 用户拿到Unresolved LogicalPlan的DataFrame之后，然后执行一些show、select、groupBy操作，最后执行一个action算子
+      // FIXME 在执行了DataFrame的上述要求返回结果数据操作之后，才会实际去出发SparkSQL后续的sql执行流程
+      // FIXME 包括Analyzer、Optimizer、SparkPlan、execute PhysicalPlan
+
+      // FIXME parseSql(sqlText)总结下：底层调用SqlParser的apply方法，即由SqlParser将sql语句通过内部的各种select、
+      // FIXME insert这种词法、语法解析器去解析，然后将sql各部分组装成一个LogicalPlan，这里指示一颗语法树，还不知道具体执行时候
+      // FIXME 以及数据来源，所以叫做Unresolved LogicPlan
+
+      // FIXME parseSql方法传入sql语句，调用SqlParser解析sql，获取Unresolved LogicPlan
       DataFrame(this, parseSql(sqlText))
     } else {
       sys.error(s"Unsupported SQL dialect: ${conf.dialect}")
@@ -997,6 +1021,7 @@ class SQLContext(@transient val sparkContext: SparkContext)
 
     def numPartitions: Int = self.conf.numShufflePartitions
 
+    // FIXME 针对逻辑执行计划，进一步的具体化和物化
     def strategies: Seq[Strategy] =
       experimental.extraStrategies ++ (
       DataSourceStrategy ::
@@ -1070,7 +1095,7 @@ class SQLContext(@transient val sparkContext: SparkContext)
       Batch("Add exchange", Once, AddExchange(self)) :: Nil
   }
 
-  /**
+  /* FIXME 使用Spark执行关系查询的主要工作流。旨在允许开发人员方便地访问查询执行的中间阶段。
    * :: DeveloperApi ::
    * The primary workflow for executing relational queries using Spark.  Designed to allow easy
    * access to the intermediate phases of query execution for developers.
@@ -1079,23 +1104,35 @@ class SQLContext(@transient val sparkContext: SparkContext)
   protected[sql] class QueryExecution(val logical: LogicalPlan) {
     def assertAnalyzed(): Unit = analyzer.checkAnalysis(analyzed)
 
+    // FIXME 用unresolved logicalplan去构造一个QueryExecution的实例对象，那么sql语句的设计执行就会一步步触发
+    // FIXME 返回一个Resolved LogicalPlan
     lazy val analyzed: LogicalPlan = analyzer(logical)
+
+    // FIXME 通过cacheManager如果之前已经缓存过这个执行计划，再次执行就可以使用缓存中数据
     lazy val withCachedData: LogicalPlan = {
       assertAnalyzed()
       cacheManager.useCachedData(analyzed)
     }
+
+    // FIXME 调用Optimizer的apply方法，针对Resolved LogicalPlan调用optimizer进行优化，获得优化后的Optimized LogicalPlan
     lazy val optimizedPlan: LogicalPlan = optimizer(withCachedData)
 
     // TODO: Don't just pick the first one...
+    // FIXME 用SparkPlanner创建一个SparkPlan，这里已经是物理执行计划了PhysicalPlan
     lazy val sparkPlan: SparkPlan = {
       SparkPlan.currentContext.set(self)
+      // FIXME 进一步优化
       planner(optimizedPlan).next()
     }
     // executedPlan should not be used to initialize any SparkPlan. It should be
     // only used for execution.
+    // FIXME 使用SparkPlan生成一个可执行的SparkPlan，此时就是PhysicalPlan，物理执行计划，直接就可以执行。
+    // FIXME 此时已经绑定到了物理数据源，包括join，默认spark内部会对小表进行广播的。
+    // FIXME 从物理计划转换成可执行的物理计划
     lazy val executedPlan: SparkPlan = prepareForExecution(sparkPlan)
 
     /** Internal version of the RDD. Avoids copies and has no schema */
+      // FIXME 执行物理计划，生成RDD
     lazy val toRdd: RDD[Row] = executedPlan.execute()
 
     protected def stringOrError[A](f: => A): String =

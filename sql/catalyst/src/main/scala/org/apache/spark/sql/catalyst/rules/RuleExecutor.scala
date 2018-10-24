@@ -45,6 +45,7 @@ abstract class RuleExecutor[TreeType <: TreeNode[_]] extends Logging {
    * Executes the batches of rules defined by the subclass. The batches are executed serially
    * using the defined execution strategy. Within each batch, rules are also executed serially.
    */
+  // FIXME 该方法最重要的就是将LogicalPlan与它所需要的数据源绑定起来，从个人让Unresolved LogicalPlan变为Resolved LogicalPlan
   def apply(plan: TreeType): TreeType = {
     var curPlan = plan
 

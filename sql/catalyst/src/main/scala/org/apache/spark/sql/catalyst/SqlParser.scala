@@ -119,6 +119,7 @@ class SqlParser extends AbstractSparkSQLParser with DataTypeParser {
     }
   }
 
+  // FIXME 从这里可以看出来，spark sql是支持至少两种主要的sql语法的，包括select语法和insert语句
   protected lazy val start: Parser[LogicalPlan] =
     ( (select | ("(" ~> select <~ ")")) *
       ( UNION ~ ALL        ^^^ { (q1: LogicalPlan, q2: LogicalPlan) => Union(q1, q2) }
@@ -129,6 +130,7 @@ class SqlParser extends AbstractSparkSQLParser with DataTypeParser {
     | insert
     )
 
+  // FIXME  针对select语句执行解析，包括from、where、group、having、sort、limit
   protected lazy val select: Parser[LogicalPlan] =
     SELECT ~> DISTINCT.? ~
       repsep(projection, ",") ~
@@ -151,6 +153,7 @@ class SqlParser extends AbstractSparkSQLParser with DataTypeParser {
           withLimit
       }
 
+  // FIXME 解析insert overwrite语法
   protected lazy val insert: Parser[LogicalPlan] =
     INSERT ~> (OVERWRITE ^^^ true | INTO ^^^ false) ~ (TABLE ~> relation) ~ select ^^ {
       case o ~ r ~ s => InsertIntoTable(r, Map.empty[String, Option[String]], s, o)
@@ -163,6 +166,7 @@ class SqlParser extends AbstractSparkSQLParser with DataTypeParser {
 
   // Based very loosely on the MySQL Grammar.
   // http://dev.mysql.com/doc/refman/5.0/en/join.html
+  // FIXME 会将sql语句里面解析出来的各种token或者TreeNode给关联起来，最后组成一颗语法书，语法树即封装在LogicalPlan中，此时的LogicalPlan还是Unresolved LogicalPlan
   protected lazy val relations: Parser[LogicalPlan] =
     ( relation ~ rep1("," ~> relation) ^^ {
         case r1 ~ joins => joins.foldLeft(r1) { case(lhs, r) => Join(lhs, r, Inner, None) } }

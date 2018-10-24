@@ -33,6 +33,9 @@ import org.apache.spark.sql.types.StringType
  *
  * @param fallback A function that parses an input string to a logical plan
  */
+/*
+  FIXME apply()方法在父类中实现
+ */
 private[sql] class SparkSQLParser(fallback: String => LogicalPlan) extends AbstractSparkSQLParser {
 
   // A parser for the key-value part of the "SET [key = [value ]]" syntax

@@ -83,6 +83,7 @@ case class Union(left: LogicalPlan, right: LogicalPlan) extends BinaryNode {
     left.output.zip(right.output).forall { case (l,r) => l.dataType == r.dataType }
 }
 
+// FIXME 通过Join，其实可以发现， left: LogicalPlan,right: LogicalPlan,就是将sql语句中各个部分，通过sparksql规则组装成一颗语法树
 case class Join(
   left: LogicalPlan,
   right: LogicalPlan,

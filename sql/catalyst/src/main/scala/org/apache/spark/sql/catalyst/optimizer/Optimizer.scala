@@ -32,6 +32,7 @@ import org.apache.spark.sql.types._
 abstract class Optimizer extends RuleExecutor[LogicalPlan]
 
 object DefaultOptimizer extends Optimizer {
+  // FIXME batches封装了每个spark sql版本中可以对逻辑执行计划 执行的优化策略
   val batches =
     // SubQueries are only needed for analysis and can be removed before execution.
     Batch("Remove SubQueries", FixedPoint(100),
